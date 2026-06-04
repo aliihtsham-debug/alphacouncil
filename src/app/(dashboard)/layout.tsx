@@ -8,12 +8,14 @@ import {
   Target,
   Clock,
   ScanLine,
+  FileText,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useUIStore } from "@/stores/ui-store";
 
 const sidebarLinks = [
   { href: "/committee", label: "Committee", icon: Brain },
@@ -21,6 +23,7 @@ const sidebarLinks = [
   { href: "/recommendation", label: "Recommendation", icon: Target },
   { href: "/history", label: "Trade History", icon: Clock },
   { href: "/scanner", label: "Market Scanner", icon: ScanLine },
+  { href: "/reports", label: "Reports", icon: FileText },
 ];
 
 export default function DashboardLayout({
@@ -29,24 +32,24 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = React.useState(false);
+  const { sidebarCollapsed, toggleSidebar } = useUIStore();
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)]">
       {/* Sidebar */}
       <motion.aside
         initial={false}
-        animate={{ width: collapsed ? 64 : 220 }}
+        animate={{ width: sidebarCollapsed ? 64 : 220 }}
         transition={{ duration: 0.3 }}
         className="sticky top-16 hidden h-[calc(100vh-4rem)] border-r border-border glass-subtle md:block"
       >
         <div className="flex h-full flex-col p-3">
           {/* Collapse toggle */}
           <button
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={toggleSidebar}
             className="mb-4 flex h-8 w-8 items-center justify-center rounded-lg hover:bg-muted transition-colors self-end"
           >
-            {collapsed ? (
+            {sidebarCollapsed ? (
               <ChevronRight className="h-4 w-4" />
             ) : (
               <ChevronLeft className="h-4 w-4" />
@@ -69,7 +72,7 @@ export default function DashboardLayout({
                   )}
                 >
                   <link.icon className="h-5 w-5 shrink-0" />
-                  {!collapsed && <span>{link.label}</span>}
+                  {!sidebarCollapsed && <span>{link.label}</span>}
                 </Link>
               );
             })}

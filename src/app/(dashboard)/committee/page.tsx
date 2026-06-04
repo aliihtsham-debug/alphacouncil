@@ -2,15 +2,24 @@
 
 import * as React from "react";
 import { motion } from "framer-motion";
-import { Brain, TrendingUp, Shield, BarChart3, Target } from "lucide-react";
+import {
+  Brain,
+  TrendingUp,
+  Shield,
+  BarChart3,
+  Target,
+  ArrowRight,
+} from "lucide-react";
 import { GlassCard } from "@/components/shared/glass-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useAgentStore } from "@/stores/agent-store";
+import { useDebate } from "@/hooks/use-debate";
 import { AgentType, AgentStatus } from "@/types/agent";
 import { cn } from "@/lib/utils";
+import Link from "next/link";
 
 const agentConfig: Record<
   AgentType,
@@ -74,14 +83,16 @@ const examplePrompts = [
 
 export default function CommitteePage() {
   const [prompt, setPrompt] = React.useState("");
-  const { agents, isActive, finalRecommendation, startSession, reset } =
-    useAgentStore();
+  const { agents, isActive, finalRecommendation, error } = useAgentStore();
+  const { isStreaming, startDebate, resetDebate } = useDebate();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prompt.trim()) return;
-    startSession(`session_${Date.now()}`, prompt);
+    if (!prompt.trim() || isStreaming) return;
+    startDebate(prompt);
   };
+
+  const isDebating = isActive || isStreaming;
 
   const getStatusBadge = (status: AgentStatus) => {
     switch (status) {
@@ -114,6 +125,13 @@ export default function CommitteePage() {
         </p>
       </motion.div>
 
+      {/* Error */}
+      {error && (
+        <div className="mx-auto max-w-2xl rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-center text-sm text-red-400">
+          {error}
+        </div>
+      )}
+
       {/* Input */}
       <motion.form
         initial={{ opacity: 0, y: 20 }}
@@ -128,26 +146,32 @@ export default function CommitteePage() {
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="Ask the committee..."
             className="border-0 bg-transparent focus-visible:ring-0"
-            disabled={isActive}
+            disabled={isDebating}
           />
-          <Button type="submit" variant="glow" disabled={isActive || !prompt.trim()}>
-            {isActive ? "Debating..." : "Start Debate"}
+          <Button
+            type="submit"
+            variant="glow"
+            disabled={isDebating || !prompt.trim()}
+          >
+            {isDebating ? "Debating..." : "Start Debate"}
           </Button>
         </div>
 
         {/* Example prompts */}
-        <div className="mt-3 flex flex-wrap gap-2 justify-center">
-          {examplePrompts.map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setPrompt(p)}
-              className="text-xs text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-full px-3 py-1 transition-colors"
-            >
-              {p}
-            </button>
-          ))}
-        </div>
+        {!isDebating && (
+          <div className="mt-3 flex flex-wrap gap-2 justify-center">
+            {examplePrompts.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPrompt(p)}
+                className="text-xs text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-full px-3 py-1 transition-colors"
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        )}
       </motion.form>
 
       {/* Agent Cards */}
@@ -168,7 +192,8 @@ export default function CommitteePage() {
                   "h-full p-5 transition-all duration-300",
                   agentState.status === AgentStatus.THINKING && "shadow-glow",
                   agentState.status === AgentStatus.STREAMING && "shadow-glow",
-                  agentState.status === AgentStatus.COMPLETED && "border-green-500/30"
+                  agentState.status === AgentStatus.COMPLETED &&
+                    "border-green-500/30"
                 )}
               >
                 <div className="flex items-start justify-between mb-4">
@@ -188,11 +213,13 @@ export default function CommitteePage() {
                   {config.description}
                 </p>
 
-                {/* Progress bar */}
+                {/* Animated progress for active agents */}
                 {(agentState.status === AgentStatus.THINKING ||
                   agentState.status === AgentStatus.STREAMING) && (
                   <Progress
-                    value={agentState.status === AgentStatus.STREAMING ? 60 : 30}
+                    value={
+                      agentState.status === AgentStatus.STREAMING ? 60 : 30
+                    }
                     className="h-1"
                     indicatorClassName="bg-primary"
                   />
@@ -205,6 +232,13 @@ export default function CommitteePage() {
                       {JSON.stringify(agentState.output, null, 2).slice(0, 300)}
                       {JSON.stringify(agentState.output).length > 300 && "..."}
                     </pre>
+                  </div>
+                )}
+
+                {/* Error display */}
+                {agentState.error && (
+                  <div className="mt-3 rounded-lg bg-red-500/10 p-3 text-xs text-red-400">
+                    {agentState.error}
                   </div>
                 )}
 
@@ -243,19 +277,25 @@ export default function CommitteePage() {
               {finalRecommendation.investmentThesis}
             </p>
             <div className="flex gap-3 justify-center">
-              <Button variant="success">Approve Trade</Button>
-              <Button variant="outline">Modify</Button>
-              <Button variant="danger">Reject</Button>
+              <Button variant="success" asChild>
+                <Link href="/recommendation" className="gap-2">
+                  Review & Approve
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+              <Button variant="outline" onClick={resetDebate}>
+                New Debate
+              </Button>
             </div>
           </GlassCard>
         </motion.div>
       )}
 
-      {/* Reset */}
-      {isActive && (
+      {/* Reset during debate */}
+      {isDebating && !finalRecommendation && (
         <div className="text-center">
-          <Button variant="ghost" onClick={reset}>
-            Reset Debate
+          <Button variant="ghost" onClick={resetDebate}>
+            Cancel Debate
           </Button>
         </div>
       )}
