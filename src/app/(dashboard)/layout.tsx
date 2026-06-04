@@ -7,6 +7,7 @@ import {
   BarChart3,
   Target,
   Clock,
+  ScanLine,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
@@ -19,6 +20,7 @@ const sidebarLinks = [
   { href: "/portfolio", label: "Portfolio", icon: BarChart3 },
   { href: "/recommendation", label: "Recommendation", icon: Target },
   { href: "/history", label: "Trade History", icon: Clock },
+  { href: "/scanner", label: "Market Scanner", icon: ScanLine },
 ];
 
 export default function DashboardLayout({
