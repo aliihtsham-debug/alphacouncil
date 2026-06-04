@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 interface WalletState {
   address: string | null;
@@ -10,17 +11,29 @@ interface WalletState {
   setConnecting: (connecting: boolean) => void;
 }
 
-export const useWalletStore = create<WalletState>((set) => ({
-  address: null,
-  chain: "BNB",
-  isConnected: false,
-  isConnecting: false,
+export const useWalletStore = create<WalletState>()(
+  persist(
+    (set) => ({
+      address: null,
+      chain: "BNB",
+      isConnected: false,
+      isConnecting: false,
 
-  connect: (address: string, chain = "BNB") =>
-    set({ address, chain, isConnected: true, isConnecting: false }),
+      connect: (address: string, chain = "BNB") =>
+        set({ address, chain, isConnected: true, isConnecting: false }),
 
-  disconnect: () =>
-    set({ address: null, chain: "BNB", isConnected: false, isConnecting: false }),
+      disconnect: () =>
+        set({ address: null, chain: "BNB", isConnected: false, isConnecting: false }),
 
-  setConnecting: (connecting: boolean) => set({ isConnecting: connecting }),
-}));
+      setConnecting: (connecting: boolean) => set({ isConnecting: connecting }),
+    }),
+    {
+      name: "alphacouncil-wallet",
+      partialize: (state) => ({
+        address: state.address,
+        chain: state.chain,
+        isConnected: state.isConnected,
+      }),
+    }
+  )
+);

@@ -42,7 +42,15 @@ export async function getMarketOverview() {
     };
   } catch (error) {
     console.error("CMC API error, falling back to mock:", error);
-    return getMarketOverview(); // Will use mock on retry
+    return {
+      totalMarketCap: mockGlobalMetrics.totalMarketCap,
+      totalVolume24h: mockGlobalMetrics.totalVolume24h,
+      btcDominance: mockGlobalMetrics.btcDominance,
+      ethDominance: mockGlobalMetrics.ethDominance,
+      fearGreedIndex: mockGlobalMetrics.fearGreedIndex,
+      fearGreedClassification: mockGlobalMetrics.fearGreedClassification,
+      topTokens: mockTokens.slice(0, 10),
+    };
   }
 }
 

@@ -7,22 +7,58 @@ import { usePortfolioStore } from "@/stores/portfolio-store";
 import { analyzePortfolio } from "@/services/portfolio/analyzer";
 
 export function useWallet() {
-  const { address, isConnected, isConnecting, connect: storeConnect, disconnect: storeDisconnect } = useWalletStore();
+  const { address, isConnected, isConnecting, connect: storeConnect, disconnect: storeDisconnect, setConnecting } = useWalletStore();
   const { setPortfolio, setLoading, setError } = usePortfolioStore();
 
   const handleConnect = React.useCallback(async () => {
     try {
+      setConnecting(true);
       const state = await connectWallet("BNB");
       storeConnect(state.address!, "BNB");
     } catch (error) {
       console.error("Wallet connection failed:", error);
+      throw error;
+    } finally {
+      setConnecting(false);
     }
-  }, [storeConnect]);
+  }, [storeConnect, setConnecting]);
 
   const handleDisconnect = React.useCallback(() => {
     disconnect();
     storeDisconnect();
   }, [storeDisconnect]);
+
+  // Listen for wallet account/chain changes
+  React.useEffect(() => {
+    const ethereum = (window as unknown as Record<string, unknown>).ethereum as {
+      on?: (event: string, handler: (...args: unknown[]) => void) => void;
+      removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
+    } | undefined;
+
+    if (!ethereum?.on) return;
+
+    const handleAccountsChanged = (accounts: unknown) => {
+      const accountList = accounts as string[];
+      if (accountList.length === 0) {
+        storeDisconnect();
+      } else {
+        storeConnect(accountList[0], useWalletStore.getState().chain);
+      }
+    };
+
+    const handleChainChanged = () => {
+      // Reload on chain change to reset all chain-specific state
+      window.location.reload();
+    };
+
+    ethereum.on("accountsChanged", handleAccountsChanged);
+    ethereum.on("chainChanged", handleChainChanged);
+
+    return () => {
+      ethereum.removeListener?.("accountsChanged", handleAccountsChanged);
+      ethereum.removeListener?.("chainChanged", handleChainChanged);
+    };
+  }, [storeConnect, storeDisconnect]);
 
   const refreshPortfolio = React.useCallback(async () => {
     if (!address) return;

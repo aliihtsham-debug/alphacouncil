@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatUsd, formatPercent, formatCompact } from "@/lib/utils";
 import type { CMCToken } from "@/services/coinmarketcap/types";
+import { mockTokens } from "@/services/coinmarketcap/mock-data";
 
 // ─── Category Tabs ───────────────────────────────────────
 
@@ -30,42 +31,38 @@ const CATEGORIES = [
 
 type ViewMode = "trending" | "gainers" | "losers";
 
-// ─── Mock data (fetched from API in production) ──────────
+const categoryTags: Record<string, string[]> = {
+  AI: ["ai-big-data", "ai-agents", "artificial-intelligence"],
+  DeFi: ["defi", "decentralized-finance"],
+  Gaming: ["gaming", "metaverse", "play-to-earn"],
+  BNB: ["bnb-chain", "binance-smart-chain", "bsc"],
+  Meme: ["memes", "dog-themed"],
+};
 
-import { mockTokens } from "@/services/coinmarketcap/mock-data";
+function filterByCategory(tokens: CMCToken[], category: string): CMCToken[] {
+  if (category === "all") return tokens;
+  const tags = categoryTags[category] ?? [];
+  return tokens.filter((t) =>
+    t.tags.some((tag) => tags.some((ct) => tag.includes(ct)))
+  );
+}
 
-function getFilteredTokens(category: string, mode: ViewMode): CMCToken[] {
-  let tokens = [...mockTokens];
-
-  if (category !== "all") {
-    const categoryTags: Record<string, string[]> = {
-      AI: ["ai-big-data", "ai-agents", "artificial-intelligence"],
-      DeFi: ["defi", "decentralized-finance"],
-      Gaming: ["gaming", "metaverse", "play-to-earn"],
-      BNB: ["bnb-chain", "binance-smart-chain", "bsc"],
-      Meme: ["memes", "dog-themed"],
-    };
-    const tags = categoryTags[category] ?? [];
-    tokens = tokens.filter((t) =>
-      t.tags.some((tag) => tags.some((ct) => tag.includes(ct)))
-    );
-  }
-
+function sortByMode(tokens: CMCToken[], mode: ViewMode): CMCToken[] {
+  const sorted = [...tokens];
   if (mode === "gainers") {
-    tokens.sort(
+    sorted.sort(
       (a, b) =>
         (b.quote.USD.percent_change_24h ?? 0) -
         (a.quote.USD.percent_change_24h ?? 0)
     );
   } else if (mode === "losers") {
-    tokens.sort(
+    sorted.sort(
       (a, b) =>
         (a.quote.USD.percent_change_24h ?? 0) -
         (b.quote.USD.percent_change_24h ?? 0)
     );
   }
-
-  return tokens;
+  return sorted;
 }
 
 // ─── Token Card Component ────────────────────────────────
@@ -140,25 +137,64 @@ export default function ScannerPage() {
   const [category, setCategory] = React.useState("all");
   const [viewMode, setViewMode] = React.useState<ViewMode>("trending");
   const [search, setSearch] = React.useState("");
-  const [isLoading, setIsLoading] = React.useState(false);
+  const [isLoading, setIsLoading] = React.useState(true);
+  const [apiTokens, setApiTokens] = React.useState<CMCToken[]>([]);
+  const [error, setError] = React.useState<string | null>(null);
 
-  const tokens = getFilteredTokens(category, viewMode).filter(
-    (t) =>
-      !search ||
-      t.name.toLowerCase().includes(search.toLowerCase()) ||
-      t.symbol.toLowerCase().includes(search.toLowerCase())
-  );
+  // Fetch tokens from API on mount and when viewMode changes
+  React.useEffect(() => {
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+
+    const endpoint =
+      viewMode === "gainers"
+        ? "/api/market/tokens?type=gainers"
+        : viewMode === "losers"
+          ? "/api/market/tokens?type=losers"
+          : "/api/market/trending?limit=50";
+
+    fetch(endpoint)
+      .then((res) => res.json())
+      .then((result) => {
+        if (cancelled) return;
+        if (result.success && result.data) {
+          setApiTokens(result.data);
+        } else {
+          // Fallback to mock data
+          setApiTokens(mockTokens);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setApiTokens(mockTokens);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode]);
+
+  const tokens = React.useMemo(() => {
+    const filtered = filterByCategory(apiTokens, category);
+    const sorted = sortByMode(filtered, viewMode);
+    if (!search) return sorted;
+    return sorted.filter(
+      (t) =>
+        t.name.toLowerCase().includes(search.toLowerCase()) ||
+        t.symbol.toLowerCase().includes(search.toLowerCase())
+    );
+  }, [apiTokens, category, viewMode, search]);
 
   const handleCategoryChange = (cat: string) => {
-    setIsLoading(true);
     setCategory(cat);
-    setTimeout(() => setIsLoading(false), 300);
   };
 
   const handleViewModeChange = (mode: ViewMode) => {
-    setIsLoading(true);
     setViewMode(mode);
-    setTimeout(() => setIsLoading(false), 300);
   };
 
   return (

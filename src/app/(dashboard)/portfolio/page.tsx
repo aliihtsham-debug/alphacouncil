@@ -17,46 +17,51 @@ import { TrendingUp, TrendingDown, DollarSign, Shield, AlertTriangle } from "luc
 import { GlassCard } from "@/components/shared/glass-card";
 import { AnimatedNumber } from "@/components/shared/animated-number";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePortfolioStore } from "@/stores/portfolio-store";
-import { useWalletStore } from "@/stores/wallet-store";
+import { useWallet } from "@/hooks/use-wallet";
+import { RefreshCw } from "lucide-react";
 import { formatUsd, formatPercent, getRiskColor, getRiskLevel } from "@/lib/utils";
-
-// Mock data for demo
-const mockPortfolio = {
-  totalValueUsd: 12847.53,
-  stablecoinRatio: 0.15,
-  riskScore: 42,
-  concentrationRisk: 0.35,
-  assets: [
-    { tokenSymbol: "BNB", tokenName: "BNB", amount: 18.5, valueUsd: 5247.8, allocationPct: 0.408, sector: "Layer1", priceChange24h: 2.34 },
-    { tokenSymbol: "ETH", tokenName: "Ethereum", amount: 1.2, valueUsd: 3891.6, allocationPct: 0.303, sector: "Layer1", priceChange24h: -1.12 },
-    { tokenSymbol: "FET", tokenName: "Fetch.ai", amount: 1250, valueUsd: 1875.0, allocationPct: 0.146, sector: "AI", priceChange24h: 5.67 },
-    { tokenSymbol: "USDT", tokenName: "Tether", amount: 1500, valueUsd: 1500.0, allocationPct: 0.117, sector: "Stablecoin", priceChange24h: 0.01 },
-    { tokenSymbol: "LINK", tokenName: "Chainlink", amount: 25, valueUsd: 333.13, allocationPct: 0.026, sector: "Infrastructure", priceChange24h: -0.45 },
-  ],
-  sectorDistribution: [
-    { sector: "Layer1", valueUsd: 9139.4, allocationPct: 0.711 },
-    { sector: "AI", valueUsd: 1875.0, allocationPct: 0.146 },
-    { sector: "Stablecoin", valueUsd: 1500.0, allocationPct: 0.117 },
-    { sector: "Infrastructure", valueUsd: 333.13, allocationPct: 0.026 },
-  ],
-  analyzedAt: new Date().toISOString(),
-};
 
 const COLORS = ["#06b6d4", "#a855f7", "#22c55e", "#f59e0b", "#ef4444"];
 
 export default function PortfolioPage() {
-  const { isConnected } = useWalletStore();
-  const { data, isLoading, setPortfolio } = usePortfolioStore();
+  const { address, isConnected, refreshPortfolio } = useWallet();
+  const { data, isLoading, setPortfolio, setLoading, setError } = usePortfolioStore();
 
   React.useEffect(() => {
-    if (isConnected && !data) {
-      // Simulate loading
-      const timer = setTimeout(() => setPortfolio(mockPortfolio), 800);
-      return () => clearTimeout(timer);
+    if (isConnected && address && !data) {
+      setLoading(true);
+      refreshPortfolio().catch(() => {
+        // Fallback: fetch from API directly
+        fetch(`/api/portfolio?address=${address}&chain=BNB`)
+          .then((res) => res.json())
+          .then((result) => {
+            if (result.success) setPortfolio(result.data);
+            else setError(result.error ?? "Failed to load portfolio");
+          })
+          .catch((err) => setError(err.message))
+          .finally(() => setLoading(false));
+      });
     }
-  }, [isConnected, data, setPortfolio]);
+  }, [isConnected, address, data, setPortfolio, setLoading, setError, refreshPortfolio]);
+
+  const handleRefresh = () => {
+    if (address) {
+      setLoading(true);
+      refreshPortfolio().catch(() => {
+        fetch(`/api/portfolio?address=${address}&chain=BNB`)
+          .then((res) => res.json())
+          .then((result) => {
+            if (result.success) setPortfolio(result.data);
+            else setError(result.error ?? "Failed to refresh");
+          })
+          .catch((err) => setError(err.message))
+          .finally(() => setLoading(false));
+      });
+    }
+  };
 
   if (!isConnected) {
     return (
@@ -98,9 +103,21 @@ export default function PortfolioPage() {
         <h1 className="text-3xl font-bold mb-2">
           Portfolio <span className="text-gradient-cyan">Overview</span>
         </h1>
-        <p className="text-muted-foreground">
-          Last analyzed: {new Date(data.analyzedAt).toLocaleString()}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-muted-foreground">
+            Last analyzed: {new Date(data.analyzedAt).toLocaleString()}
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isLoading}
+            className="gap-1.5"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
       </motion.div>
 
       {/* Summary Cards */}

@@ -1,7 +1,7 @@
 /**
  * LLM Service — handles all OpenAI / OpenRouter API calls
  *
- * Primary: OpenAI GPT-4o
+ * Primary: OpenAI GPT-4o (with retry + exponential backoff)
  * Fallback: OpenRouter
  */
 
@@ -12,10 +12,31 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL =
   process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "openai/gpt-4o";
+
+const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_RETRIES = 3;
 
 interface LLMResponse {
   content: string;
   tokensUsed: number;
+}
+
+/**
+ * Fetch with timeout support.
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = DEFAULT_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /**
@@ -30,26 +51,43 @@ export async function callLLM(
     responseFormat?: { type: "json_object" } | { type: "text" };
   }
 ): Promise<LLMResponse> {
-  // Try OpenAI first
+  let lastError: Error | null = null;
+
+  // Try OpenAI first (with retries)
   if (OPENAI_API_KEY) {
-    try {
-      return await callOpenAI(messages, options);
-    } catch (error) {
-      console.warn("OpenAI call failed, trying OpenRouter:", error);
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        return await callOpenAI(messages, options);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt < MAX_RETRIES) {
+          const delay = Math.pow(2, attempt) * 1000;
+          console.warn(`OpenAI attempt ${attempt + 1} failed, retrying in ${delay}ms:`, lastError.message);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+      }
     }
+    console.warn("OpenAI exhausted retries, trying OpenRouter:", lastError?.message);
   }
 
-  // Fallback to OpenRouter
+  // Fallback to OpenRouter (with retries)
   if (OPENROUTER_API_KEY) {
-    try {
-      return await callOpenRouter(messages, options);
-    } catch (error) {
-      console.warn("OpenRouter call failed:", error);
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        return await callOpenRouter(messages, options);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt < MAX_RETRIES) {
+          const delay = Math.pow(2, attempt) * 1000;
+          console.warn(`OpenRouter attempt ${attempt + 1} failed, retrying in ${delay}ms:`, lastError.message);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+      }
     }
   }
 
-  // If no API keys available, throw
-  throw new Error(
+  // If no API keys available or all retries exhausted
+  throw lastError ?? new Error(
     "No LLM API key configured. Set OPENAI_API_KEY or OPENROUTER_API_KEY."
   );
 }
@@ -66,7 +104,7 @@ async function callOpenAI(
     responseFormat?: { type: "json_object" } | { type: "text" };
   }
 ): Promise<LLMResponse> {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -109,7 +147,7 @@ async function callOpenRouter(
     responseFormat?: { type: "json_object" } | { type: "text" };
   }
 ): Promise<LLMResponse> {
-  const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+  const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -118,7 +156,7 @@ async function callOpenRouter(
       "X-Title": "Alpha Council",
     },
     body: JSON.stringify({
-      model: options?.model ?? "openai/gpt-4o",
+      model: options?.model ?? OPENROUTER_MODEL,
       messages,
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.maxTokens ?? 2000,
@@ -160,13 +198,25 @@ export function parseJsonResponse<T>(content: string): T {
       }
     }
 
-    // Try to find JSON object in the text
-    const objectMatch = content.match(/\{[\s\S]*\}/);
-    if (objectMatch) {
-      try {
-        return JSON.parse(objectMatch[0]) as T;
-      } catch {
-        // Fall through
+    // Try to find JSON object in the text (balanced braces)
+    const firstBrace = content.indexOf("{");
+    if (firstBrace !== -1) {
+      let depth = 0;
+      let endIdx = firstBrace;
+      for (let i = firstBrace; i < content.length; i++) {
+        if (content[i] === "{") depth++;
+        if (content[i] === "}") depth--;
+        if (depth === 0) {
+          endIdx = i;
+          break;
+        }
+      }
+      if (depth === 0) {
+        try {
+          return JSON.parse(content.slice(firstBrace, endIdx + 1)) as T;
+        } catch {
+          // Fall through
+        }
       }
     }
 

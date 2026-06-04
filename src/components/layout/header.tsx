@@ -4,17 +4,21 @@ import * as React from "react";
 import { motion } from "framer-motion";
 import { Wallet, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useWalletStore } from "@/stores/wallet-store";
+import { useWallet } from "@/hooks/use-wallet";
+import { useUIStore } from "@/stores/ui-store";
 import { truncateAddress } from "@/lib/utils";
 import Link from "next/link";
 
 export function Header() {
-  const { isConnected, address, connect, disconnect, isConnecting } = useWalletStore();
+  const { isConnected, address, connect, disconnect, isConnecting } = useWallet();
+  const { showToast } = useUIStore();
 
   const handleConnect = async () => {
-    // Placeholder: Trust Wallet connection via SDK
-    // In production, use Trust Wallet SDK
-    connect("0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18", "BNB");
+    try {
+      await connect();
+    } catch (error) {
+      showToast("Failed to connect wallet", "error");
+    }
   };
 
   return (
@@ -66,7 +70,7 @@ export function Header() {
               <span className="hidden sm:inline text-sm text-muted-foreground font-mono">
                 {truncateAddress(address)}
               </span>
-              <Button variant="outline" size="sm" onClick={disconnect}>
+              <Button variant="outline" size="sm" onClick={() => disconnect()}>
                 Disconnect
               </Button>
             </div>

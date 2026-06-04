@@ -1,8 +1,8 @@
 /**
  * SSE Streaming endpoint for real-time agent debate.
  *
- * Returns a StreamableTextResponse that streams events as they happen.
- * Client connects via EventSource and receives JSON events.
+ * Returns a ReadableStream that streams events as they happen.
+ * Client connects via fetch + ReadableStream (use-debate hook).
  */
 
 import { NextRequest } from "next/server";
@@ -10,6 +10,16 @@ import { Orchestrator } from "@/services/ai/orchestrator";
 import { getMarketOverview } from "@/services/coinmarketcap";
 
 export const maxDuration = 120;
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+export async function OPTIONS() {
+  return new Response(null, { headers: corsHeaders });
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,7 +29,7 @@ export async function POST(request: NextRequest) {
     if (!prompt) {
       return new Response(
         JSON.stringify({ error: "Prompt is required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
 
@@ -66,7 +76,8 @@ export async function POST(request: NextRequest) {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
-        "X-Accel-Buffering": "no", // Disable nginx buffering
+        "X-Accel-Buffering": "no",
+        ...corsHeaders,
       },
     });
   } catch (error) {
@@ -77,7 +88,7 @@ export async function POST(request: NextRequest) {
       }),
       {
         status: 500,
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...corsHeaders },
       }
     );
   }
