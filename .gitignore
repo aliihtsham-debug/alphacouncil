@@ -42,3 +42,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# sentry
+.sentryclirc
+sentry.properties
+
+# claude code
+.claude/settings.local.json
+
+# prisma
+prisma/migrations/migration_lock.toml

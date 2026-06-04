@@ -1,0 +1,208 @@
+// ─── Alpha Council Database Schema ──────────────────────
+// Generated from ARCHITECTURE.md §3
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Prisma 7: url is configured in prisma.config.ts
+  // For Prisma <7, use: url = env("DATABASE_URL")
+}
+
+// ─── User & Wallet ───────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  walletAddress String    @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  portfolios      Portfolio[]
+  recommendations Recommendation[]
+  executedTrades  ExecutedTrade[]
+  reports         Report[]
+  auditLogs       AuditLog[]
+  wallet          Wallet?
+}
+
+model Wallet {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  address     String   @unique
+  chain       String   @default("BNB")
+  connectedAt DateTime @default(now())
+  isActive    Boolean  @default(true)
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+// ─── Portfolio ───────────────────────────────────────
+
+model Portfolio {
+  id                String   @id @default(cuid())
+  userId            String
+  totalValueUsd     Decimal  @db.Decimal(20, 8)
+  stablecoinRatio   Decimal  @db.Decimal(5, 4)
+  riskScore         Int
+  concentrationRisk Decimal  @db.Decimal(5, 4)
+  analyzedAt        DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id])
+  assets Asset[]
+
+  @@index([userId, analyzedAt])
+}
+
+model Asset {
+  id              String   @id @default(cuid())
+  portfolioId     String
+  tokenSymbol     String
+  tokenName       String
+  contractAddress String?
+  amount          Decimal  @db.Decimal(20, 8)
+  valueUsd        Decimal  @db.Decimal(20, 8)
+  allocationPct   Decimal  @db.Decimal(5, 4)
+  sector          String?
+  priceChange24h  Decimal? @db.Decimal(10, 4)
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id])
+
+  @@index([portfolioId])
+}
+
+// ─── AI Debate ───────────────────────────────────────
+
+model Recommendation {
+  id              String   @id @default(cuid())
+  userId          String
+  prompt          String
+  decision        Decision
+  tokenSymbol     String
+  tokenName       String
+  allocationPct   Decimal  @db.Decimal(5, 4)
+  confidence      Int
+  investmentThesis String  @db.Text
+  status          RecommendationStatus @default(PENDING)
+  createdAt       DateTime @default(now())
+
+  user          User            @relation(fields: [userId], references: [id])
+  agentDebates  AgentDebate[]
+  executedTrade ExecutedTrade?
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model AgentDebate {
+  id               String   @id @default(cuid())
+  recommendationId String
+  agentType        AgentType
+  content          String   @db.Text
+  structuredOutput Json?
+  confidence       Int?
+  latencyMs        Int?
+  createdAt        DateTime @default(now())
+
+  recommendation Recommendation @relation(fields: [recommendationId], references: [id])
+
+  @@index([recommendationId, agentType])
+}
+
+// ─── Trade Execution ─────────────────────────────────
+
+model ExecutedTrade {
+  id                String   @id @default(cuid())
+  recommendationId  String   @unique
+  userId            String
+  txHash            String?  @unique
+  tokenSymbol       String
+  action            Decision
+  amount            Decimal  @db.Decimal(20, 8)
+  amountUsd         Decimal  @db.Decimal(20, 8)
+  status            TradeStatus @default(PENDING)
+  executedAt        DateTime?
+  createdAt         DateTime @default(now())
+
+  recommendation Recommendation @relation(fields: [recommendationId], references: [id])
+  user           User           @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+// ─── Reports ─────────────────────────────────────────
+
+model Report {
+  id        String       @id @default(cuid())
+  userId    String
+  type      ReportType
+  format    ReportFormat
+  content   String       @db.Text
+  fileUrl   String?
+  createdAt DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+// ─── Audit ───────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([action])
+}
+
+// ─── Enums ───────────────────────────────────────────
+
+enum Decision {
+  BUY
+  HOLD
+  SELL
+}
+
+enum RecommendationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  MODIFIED
+  EXPIRED
+}
+
+enum AgentType {
+  MARKET_RESEARCH
+  BULL_ANALYST
+  BEAR_ANALYST
+  RISK_MANAGER
+  PORTFOLIO_MANAGER
+}
+
+enum TradeStatus {
+  PENDING
+  SUBMITTED
+  CONFIRMED
+  FAILED
+  CANCELLED
+}
+
+enum ReportType {
+  INVESTMENT
+  WEEKLY_REBALANCE
+  PORTFOLIO_HEALTH
+}
+
+enum ReportFormat {
+  PDF
+  MARKDOWN
+}
