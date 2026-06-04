@@ -1,0 +1,110 @@
+"use client";
+
+import * as React from "react";
+import { motion } from "framer-motion";
+import {
+  Brain,
+  BarChart3,
+  Target,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+const sidebarLinks = [
+  { href: "/committee", label: "Committee", icon: Brain },
+  { href: "/portfolio", label: "Portfolio", icon: BarChart3 },
+  { href: "/recommendation", label: "Recommendation", icon: Target },
+  { href: "/history", label: "Trade History", icon: Clock },
+];
+
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+  const [collapsed, setCollapsed] = React.useState(false);
+
+  return (
+    <div className="flex min-h-[calc(100vh-4rem)]">
+      {/* Sidebar */}
+      <motion.aside
+        initial={false}
+        animate={{ width: collapsed ? 64 : 220 }}
+        transition={{ duration: 0.3 }}
+        className="sticky top-16 hidden h-[calc(100vh-4rem)] border-r border-border glass-subtle md:block"
+      >
+        <div className="flex h-full flex-col p-3">
+          {/* Collapse toggle */}
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="mb-4 flex h-8 w-8 items-center justify-center rounded-lg hover:bg-muted transition-colors self-end"
+          >
+            {collapsed ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+          </button>
+
+          {/* Nav links */}
+          <nav className="flex flex-col gap-2">
+            {sidebarLinks.map((link) => {
+              const isActive = pathname?.startsWith(link.href);
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                    isActive
+                      ? "bg-primary/10 text-primary shadow-sm"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <link.icon className="h-5 w-5 shrink-0" />
+                  {!collapsed && <span>{link.label}</span>}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+      </motion.aside>
+
+      {/* Mobile nav bar */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border glass-strong md:hidden">
+        <nav className="flex items-center justify-around py-2">
+          {sidebarLinks.map((link) => {
+            const isActive = pathname?.startsWith(link.href);
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={cn(
+                  "flex flex-col items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                  isActive
+                    ? "text-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <link.icon className="h-5 w-5" />
+                <span>{link.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 bg-grid min-h-[calc(100vh-4rem)]">
+        <div className="mx-auto max-w-7xl p-6 pb-24 md:pb-6">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
