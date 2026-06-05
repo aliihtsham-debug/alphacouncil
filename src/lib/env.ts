@@ -10,7 +10,7 @@ const envSchema = z.object({
   NEXT_PUBLIC_APP_NAME: z.string().default("Alpha Council"),
 
   // ─── Database ────────────────────────
-  DATABASE_URL: z.string().min(1),
+  DATABASE_URL: z.string().optional(),
 
   // ─── Redis ───────────────────────────
   REDIS_URL: z.string().optional(),

@@ -5,15 +5,8 @@
  * Fallback: OpenAI GPT-4o (optional, used when OpenRouter fails)
  */
 
-import type { LLMMessage, LLMConfig } from "./types";
-
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const OPENROUTER_BASE_URL =
-  process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "openrouter/owl-alpha";
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o";
+import { env } from "@/lib/env";
+import type { LLMMessage } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 3;
@@ -21,6 +14,27 @@ const MAX_RETRIES = 3;
 interface LLMResponse {
   content: string;
   tokensUsed: number;
+}
+
+/**
+ * Get OpenRouter config from validated env (read at call time, not module load time).
+ */
+function getOpenRouterConfig() {
+  return {
+    apiKey: env.OPENROUTER_API_KEY,
+    baseUrl: env.OPENROUTER_BASE_URL,
+    model: env.OPENROUTER_MODEL,
+  };
+}
+
+/**
+ * Get OpenAI config from validated env (read at call time).
+ */
+function getOpenAIConfig() {
+  return {
+    apiKey: env.OPENAI_API_KEY ?? "",
+    model: env.OPENAI_MODEL,
+  };
 }
 
 /**
@@ -56,7 +70,8 @@ export async function callLLM(
   let lastError: Error | null = null;
 
   // Try OpenRouter first (primary provider)
-  if (OPENROUTER_API_KEY) {
+  const openRouterConfig = getOpenRouterConfig();
+  if (openRouterConfig.apiKey) {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         return await callOpenRouter(messages, options);
@@ -73,7 +88,8 @@ export async function callLLM(
   }
 
   // Fallback to OpenAI (if configured)
-  if (OPENAI_API_KEY) {
+  const openAIConfig = getOpenAIConfig();
+  if (openAIConfig.apiKey) {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         return await callOpenAI(messages, options);
@@ -106,16 +122,19 @@ async function callOpenRouter(
     responseFormat?: { type: "json_object" } | { type: "text" };
   }
 ): Promise<LLMResponse> {
-  const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/chat/completions`, {
+  const config = getOpenRouterConfig();
+  const appUrl = env.NEXT_PUBLIC_APP_URL;
+
+  const response = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+      Authorization: `Bearer ${config.apiKey}`,
+      "HTTP-Referer": appUrl,
       "X-Title": "Alpha Council",
     },
     body: JSON.stringify({
-      model: options?.model ?? OPENROUTER_MODEL,
+      model: options?.model ?? config.model,
       messages,
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.maxTokens ?? 2000,
@@ -151,14 +170,16 @@ async function callOpenAI(
     responseFormat?: { type: "json_object" } | { type: "text" };
   }
 ): Promise<LLMResponse> {
+  const config = getOpenAIConfig();
+
   const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      Authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify({
-      model: options?.model ?? OPENAI_MODEL,
+      model: options?.model ?? config.model,
       messages,
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.maxTokens ?? 2000,
