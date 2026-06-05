@@ -1,18 +1,19 @@
 /**
- * LLM Service — handles all OpenAI / OpenRouter API calls
+ * LLM Service — handles all OpenRouter / OpenAI API calls
  *
- * Primary: OpenAI GPT-4o (with retry + exponential backoff)
- * Fallback: OpenRouter
+ * Primary: OpenRouter (openrouter/owl-alpha)
+ * Fallback: OpenAI GPT-4o (optional, used when OpenRouter fails)
  */
 
 import type { LLMMessage, LLMConfig } from "./types";
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o";
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL =
   process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "openai/gpt-4o";
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL ?? "openrouter/owl-alpha";
+
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 3;
@@ -41,6 +42,7 @@ async function fetchWithTimeout(
 
 /**
  * Call the LLM with retry and fallback logic.
+ * Primary: OpenRouter → Fallback: OpenAI (if configured)
  */
 export async function callLLM(
   messages: LLMMessage[],
@@ -53,24 +55,7 @@ export async function callLLM(
 ): Promise<LLMResponse> {
   let lastError: Error | null = null;
 
-  // Try OpenAI first (with retries)
-  if (OPENAI_API_KEY) {
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        return await callOpenAI(messages, options);
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        if (attempt < MAX_RETRIES) {
-          const delay = Math.pow(2, attempt) * 1000;
-          console.warn(`OpenAI attempt ${attempt + 1} failed, retrying in ${delay}ms:`, lastError.message);
-          await new Promise((r) => setTimeout(r, delay));
-        }
-      }
-    }
-    console.warn("OpenAI exhausted retries, trying OpenRouter:", lastError?.message);
-  }
-
-  // Fallback to OpenRouter (with retries)
+  // Try OpenRouter first (primary provider)
   if (OPENROUTER_API_KEY) {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -84,55 +69,29 @@ export async function callLLM(
         }
       }
     }
+    console.warn("OpenRouter exhausted retries, trying OpenAI fallback:", lastError?.message);
+  }
+
+  // Fallback to OpenAI (if configured)
+  if (OPENAI_API_KEY) {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        return await callOpenAI(messages, options);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt < MAX_RETRIES) {
+          const delay = Math.pow(2, attempt) * 1000;
+          console.warn(`OpenAI attempt ${attempt + 1} failed, retrying in ${delay}ms:`, lastError.message);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+      }
+    }
   }
 
   // If no API keys available or all retries exhausted
   throw lastError ?? new Error(
-    "No LLM API key configured. Set OPENAI_API_KEY or OPENROUTER_API_KEY."
+    "No LLM API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY."
   );
-}
-
-/**
- * Call OpenAI API.
- */
-async function callOpenAI(
-  messages: LLMMessage[],
-  options?: {
-    model?: string;
-    temperature?: number;
-    maxTokens?: number;
-    responseFormat?: { type: "json_object" } | { type: "text" };
-  }
-): Promise<LLMResponse> {
-  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: options?.model ?? OPENAI_MODEL,
-      messages,
-      temperature: options?.temperature ?? 0.7,
-      max_tokens: options?.maxTokens ?? 2000,
-      ...(options?.responseFormat && {
-        response_format: options.responseFormat,
-      }),
-    }),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(
-      `OpenAI API error: ${response.status} ${response.statusText} — ${errorBody}`
-    );
-  }
-
-  const data = await response.json();
-  return {
-    content: data.choices[0].message.content,
-    tokensUsed: data.usage?.total_tokens ?? 0,
-  };
 }
 
 /**
@@ -170,6 +129,49 @@ async function callOpenRouter(
     const errorBody = await response.text();
     throw new Error(
       `OpenRouter API error: ${response.status} ${response.statusText} — ${errorBody}`
+    );
+  }
+
+  const data = await response.json();
+  return {
+    content: data.choices[0].message.content,
+    tokensUsed: data.usage?.total_tokens ?? 0,
+  };
+}
+
+/**
+ * Call OpenAI API (fallback).
+ */
+async function callOpenAI(
+  messages: LLMMessage[],
+  options?: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    responseFormat?: { type: "json_object" } | { type: "text" };
+  }
+): Promise<LLMResponse> {
+  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: options?.model ?? OPENAI_MODEL,
+      messages,
+      temperature: options?.temperature ?? 0.7,
+      max_tokens: options?.maxTokens ?? 2000,
+      ...(options?.responseFormat && {
+        response_format: options.responseFormat,
+      }),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `OpenAI API error: ${response.status} ${response.statusText} — ${errorBody}`
     );
   }
 

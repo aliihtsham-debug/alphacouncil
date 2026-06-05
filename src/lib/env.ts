@@ -17,10 +17,17 @@ const envSchema = z.object({
   REDIS_TOKEN: z.string().optional(),
 
   // ─── AI ──────────────────────────────
-  OPENAI_API_KEY: z.string().min(1),
+  // OpenRouter is the primary provider
+  OPENROUTER_API_KEY: z.string().min(1),
+  OPENROUTER_BASE_URL: z
+    .string()
+    .url()
+    .default("https://openrouter.ai/api/v1"),
+  OPENROUTER_MODEL: z.string().default("openrouter/owl-alpha"),
+
+  // OpenAI is optional fallback
+  OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o"),
-  OPENROUTER_API_KEY: z.string().optional(),
-  OPENROUTER_BASE_URL: z.string().url().optional(),
 
   // ─── CoinMarketCap ───────────────────
   COINMARKETCAP_API_KEY: z.string().min(1),
