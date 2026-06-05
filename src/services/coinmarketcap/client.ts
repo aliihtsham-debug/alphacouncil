@@ -5,6 +5,7 @@
  * Responses are cached via the cache layer.
  */
 
+import { getEnv } from "@/lib/env";
 import type {
   CMCListingsResponse,
   CMCTrendingResponse,
@@ -13,27 +14,29 @@ import type {
   CMCToken,
 } from "./types";
 
-const CMC_BASE_URL =
-  process.env.COINMARKETCAP_BASE_URL ||
-  "https://pro-api.coinmarketcap.com/v1";
-const CMC_API_KEY = process.env.COINMARKETCAP_API_KEY;
-
-if (!CMC_API_KEY && typeof window === "undefined") {
-  console.warn(
-    "⚠️  COINMARKETCAP_API_KEY is not set. Market data will use mock data."
-  );
+/**
+ * Get CMC config at call time (not module load time).
+ */
+function getCmcConfig() {
+  const env = getEnv();
+  return {
+    apiKey: env.COINMARKETCAP_API_KEY,
+    baseUrl: env.COINMARKETCAP_BASE_URL,
+  };
 }
 
 /**
  * Make an authenticated request to CoinMarketCap API.
  */
 async function cmcFetch<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
+  const { apiKey, baseUrl } = getCmcConfig();
+
   // If no API key, throw to trigger mock fallback
-  if (!CMC_API_KEY) {
+  if (!apiKey) {
     throw new Error("CMC_API_KEY not configured");
   }
 
-  const url = new URL(`${CMC_BASE_URL}${endpoint}`);
+  const url = new URL(`${baseUrl}${endpoint}`);
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
       url.searchParams.set(key, value);
@@ -42,7 +45,7 @@ async function cmcFetch<T>(endpoint: string, params?: Record<string, string>): P
 
   const response = await fetch(url.toString(), {
     headers: {
-      "X-CMC_PRO_API_KEY": CMC_API_KEY,
+      "X-CMC_PRO_API_KEY": apiKey,
       Accept: "application/json",
     },
     next: { revalidate: 60 }, // Next.js data cache: 60s

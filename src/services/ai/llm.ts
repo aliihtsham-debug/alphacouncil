@@ -5,7 +5,7 @@
  * Fallback: OpenAI GPT-4o (optional, used when OpenRouter fails)
  */
 
-import { env } from "@/lib/env";
+import { getEnv } from "@/lib/env";
 import type { LLMMessage } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -20,6 +20,7 @@ interface LLMResponse {
  * Get OpenRouter config from validated env (read at call time, not module load time).
  */
 function getOpenRouterConfig() {
+  const env = getEnv();
   return {
     apiKey: env.OPENROUTER_API_KEY,
     baseUrl: env.OPENROUTER_BASE_URL,
@@ -31,6 +32,7 @@ function getOpenRouterConfig() {
  * Get OpenAI config from validated env (read at call time).
  */
 function getOpenAIConfig() {
+  const env = getEnv();
   return {
     apiKey: env.OPENAI_API_KEY ?? "",
     model: env.OPENAI_MODEL,
@@ -123,7 +125,7 @@ async function callOpenRouter(
   }
 ): Promise<LLMResponse> {
   const config = getOpenRouterConfig();
-  const appUrl = env.NEXT_PUBLIC_APP_URL;
+  const appUrl = getEnv().NEXT_PUBLIC_APP_URL;
 
   const response = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
     method: "POST",

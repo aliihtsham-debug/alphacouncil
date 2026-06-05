@@ -3,16 +3,19 @@
  * Falls back to mock data when API key is not configured.
  */
 
+import { getEnv } from "@/lib/env";
 import * as client from "./client";
 import { mockTokens, mockCategories, mockGlobalMetrics } from "./mock-data";
 import type { CMCToken, CMCCategory } from "./types";
 
-const USE_MOCK = !process.env.COINMARKETCAP_API_KEY;
+function useMock() {
+  return !getEnv().COINMARKETCAP_API_KEY;
+}
 
 // ─── Public API ─────────────────────────────────────────
 
 export async function getMarketOverview() {
-  if (USE_MOCK) {
+  if (useMock()) {
     return {
       totalMarketCap: mockGlobalMetrics.totalMarketCap,
       totalVolume24h: mockGlobalMetrics.totalVolume24h,
@@ -55,7 +58,7 @@ export async function getMarketOverview() {
 }
 
 export async function getTrendingTokens(limit = 20): Promise<CMCToken[]> {
-  if (USE_MOCK) {
+  if (useMock()) {
     return mockTokens.slice(0, limit);
   }
 
@@ -68,7 +71,7 @@ export async function getTrendingTokens(limit = 20): Promise<CMCToken[]> {
 }
 
 export async function getTopGainers(limit = 20): Promise<CMCToken[]> {
-  if (USE_MOCK) {
+  if (useMock()) {
     return [...mockTokens]
       .sort(
         (a, b) =>
@@ -87,7 +90,7 @@ export async function getTopGainers(limit = 20): Promise<CMCToken[]> {
 }
 
 export async function getTopLosers(limit = 20): Promise<CMCToken[]> {
-  if (USE_MOCK) {
+  if (useMock()) {
     return [...mockTokens]
       .sort(
         (a, b) =>
@@ -109,7 +112,7 @@ export async function getTokensByCategory(
   category: string,
   limit = 50
 ): Promise<CMCToken[]> {
-  if (USE_MOCK) {
+  if (useMock()) {
     const categoryMap: Record<string, string[]> = {
       AI: ["ai-big-data", "ai-agents", "artificial-intelligence"],
       DeFi: ["defi", "decentralized-finance"],
@@ -142,7 +145,7 @@ export async function getTokensByCategory(
 }
 
 export async function getCategories(): Promise<CMCCategory[]> {
-  if (USE_MOCK) {
+  if (useMock()) {
     return mockCategories;
   }
 
@@ -158,7 +161,7 @@ export async function getCategories(): Promise<CMCCategory[]> {
 export async function getTokenBySymbol(
   symbol: string
 ): Promise<CMCToken | null> {
-  if (USE_MOCK) {
+  if (useMock()) {
     return mockTokens.find((t) => t.symbol === symbol) ?? null;
   }
 
