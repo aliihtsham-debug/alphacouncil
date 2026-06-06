@@ -2,32 +2,100 @@
 
 import * as React from "react";
 import { useWalletStore } from "@/stores/wallet-store";
-import { connectWallet, disconnectWallet as disconnect } from "@/services/trust-wallet";
 import { usePortfolioStore } from "@/stores/portfolio-store";
 import { analyzePortfolio } from "@/services/portfolio/analyzer";
+import type { WalletConnectionState } from "@/services/trust-wallet";
 
 export function useWallet() {
-  const { address, isConnected, isConnecting, connect: storeConnect, disconnect: storeDisconnect, setConnecting } = useWalletStore();
+  const {
+    address,
+    isConnected,
+    isConnecting,
+    connect: storeConnect,
+    disconnect: storeDisconnect,
+    setConnecting,
+  } = useWalletStore();
   const { setPortfolio, setLoading, setError } = usePortfolioStore();
 
   const handleConnect = React.useCallback(async () => {
     try {
       setConnecting(true);
-      const state = await connectWallet("BNB");
-      storeConnect(state.address!, "BNB");
 
-      // Create or fetch user in database
-      if (state.address) {
-        try {
-          await fetch("/api/portfolio", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ address: state.address, chain: "BNB" }),
-          });
-        } catch (dbError) {
-          console.error("Failed to create user record:", dbError);
-        }
+      // Check for Trust Wallet / any injected provider
+      const ethereum = (window as unknown as Record<string, unknown>)
+        .ethereum as {
+        request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+      } | undefined;
+
+      if (!ethereum) {
+        throw new Error(
+          "Trust Wallet not detected. Please install Trust Wallet browser extension."
+        );
       }
+
+      // Request account access
+      const accounts = (await ethereum.request({
+        method: "eth_requestAccounts",
+      })) as string[];
+
+      if (!accounts || accounts.length === 0) {
+        throw new Error("No accounts found. Please unlock your wallet.");
+      }
+
+      const walletAddress = accounts[0];
+
+      // Get chain ID
+      const chainIdHex = (await ethereum.request({
+        method: "eth_chainId",
+      })) as string;
+      const chainId = parseInt(chainIdHex, 16);
+
+      // SIWE: Get nonce from server
+      const nonceRes = await fetch("/api/auth/nonce");
+      const nonceData = await nonceRes.json();
+      if (!nonceData.success) {
+        throw new Error("Failed to get authentication nonce");
+      }
+
+      // Build SIWE message
+      const domain =
+        typeof window !== "undefined" ? window.location.host : "localhost:3000";
+      const uri =
+        typeof window !== "undefined"
+          ? window.location.origin
+          : "http://localhost:3000";
+
+      const message = `${domain} wants you to sign in with your Ethereum account:
+${walletAddress}
+
+Sign in to Alpha Council
+
+URI: ${uri}
+Version: 1
+Chain ID: ${chainId}
+Nonce: ${nonceData.nonce}
+Issued At: ${new Date().toISOString()}`;
+
+      // Sign the message with Trust Wallet
+      const signature = (await ethereum.request({
+        method: "personal_sign",
+        params: [message, walletAddress],
+      })) as string;
+
+      // Verify signature with server
+      const verifyRes = await fetch("/api/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, signature }),
+      });
+
+      const verifyData = await verifyRes.json();
+      if (!verifyData.success) {
+        throw new Error(verifyData.error || "Signature verification failed");
+      }
+
+      // Update store
+      storeConnect(walletAddress, chainId === 56 ? "BNB" : "ETH");
     } catch (error) {
       console.error("Wallet connection failed:", error);
       throw error;
@@ -36,8 +104,12 @@ export function useWallet() {
     }
   }, [storeConnect, setConnecting]);
 
-  const handleDisconnect = React.useCallback(() => {
-    disconnect();
+  const handleDisconnect = React.useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
     storeDisconnect();
   }, [storeDisconnect]);
 
@@ -45,7 +117,10 @@ export function useWallet() {
   React.useEffect(() => {
     const ethereum = (window as unknown as Record<string, unknown>).ethereum as {
       on?: (event: string, handler: (...args: unknown[]) => void) => void;
-      removeListener?: (event: string, handler: (...args: unknown[]) => void) => void;
+      removeListener?: (
+        event: string,
+        handler: (...args: unknown[]) => void
+      ) => void;
     } | undefined;
 
     if (!ethereum?.on) return;
@@ -60,7 +135,6 @@ export function useWallet() {
     };
 
     const handleChainChanged = () => {
-      // Reload on chain change to reset all chain-specific state
       window.location.reload();
     };
 
@@ -83,7 +157,11 @@ export function useWallet() {
       const analysis = analyzePortfolio(walletPortfolio);
       setPortfolio(analysis);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to refresh portfolio");
+      setError(
+        error instanceof Error ? error.message : "Failed to refresh portfolio"
+      );
+    } finally {
+      setLoading(false);
     }
   }, [address, setPortfolio, setLoading, setError]);
 

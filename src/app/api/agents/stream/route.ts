@@ -1,9 +1,5 @@
 /**
  * SSE Streaming endpoint for real-time agent debate.
- *
- * Returns a ReadableStream that streams events as they happen.
- * Client connects via fetch + ReadableStream (use-debate hook).
- * Persists debate results to the database via Prisma (when DATABASE_URL is configured).
  */
 
 import { NextRequest } from "next/server";
@@ -28,21 +24,22 @@ export async function OPTIONS() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { prompt, portfolio, userId } = body;
+    const { prompt, portfolio } = body;
 
     if (!prompt) {
       return new Response(
         JSON.stringify({ error: "Prompt is required" }),
-        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders },
+        }
       );
     }
 
-    // Get market data
+    const userId = request.headers.get("x-user-id") ?? undefined;
     const marketOverview = await getMarketOverview();
-
     const orchestrator = new Orchestrator();
 
-    // Create a ReadableStream for SSE
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
@@ -66,10 +63,9 @@ export async function POST(request: NextRequest) {
             (event) => sendEvent(event as Record<string, unknown>)
           );
 
-          // Persist to database after successful debate (non-blocking)
-          persistDebate(userId, prompt, orchestratorOutput).catch(() => {
-            // Silently fail — don't break the stream for DB errors
-          });
+          if (orchestratorOutput) {
+            persistDebate(userId, prompt, orchestratorOutput).catch(() => {});
+          }
         } catch (error) {
           sendEvent({
             type: "error",
@@ -92,8 +88,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Stream failed";
-    const stack = error instanceof Error ? error.stack : undefined;
-    console.error("SSE stream error:", message, stack);
     Sentry.captureException(error);
     return new Response(
       `data: ${JSON.stringify({ type: "error", message })}\n\n`,
@@ -105,30 +99,15 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/**
- * Persist the full debate to the database.
- * Runs as fire-and-forget — errors are logged but don't break the stream.
- */
 async function persistDebate(
   userId: string | undefined,
   prompt: string,
   output: Awaited<ReturnType<Orchestrator["runWithEvents"]>>
 ) {
   try {
-    // Ensure user exists
-    let effectiveUserId = userId;
-    if (!effectiveUserId) {
-      const anonUser = await prisma.user.create({
-        data: {
-          walletAddress: `anon_${output.sessionId}`,
-        },
-      });
-      effectiveUserId = anonUser.id;
-    }
-
     const recommendation = await prisma.recommendation.create({
       data: {
-        userId: effectiveUserId,
+        userId: userId ?? `temp_${output.sessionId}`,
         prompt,
         decision: output.recommendation.decision,
         tokenSymbol: output.recommendation.tokenSymbol,
@@ -143,13 +122,21 @@ async function persistDebate(
     const agentResults = output.agentResults;
     const agentTypeMap: Array<{
       type: AgentType;
-      result: { success: boolean; data?: unknown; error?: string; latencyMs: number };
+      result: {
+        success: boolean;
+        data?: unknown;
+        error?: string;
+        latencyMs: number;
+      };
     }> = [
       { type: AgentType.MARKET_RESEARCH, result: agentResults.marketResearch },
       { type: AgentType.BULL_ANALYST, result: agentResults.bullAnalyst },
       { type: AgentType.BEAR_ANALYST, result: agentResults.bearAnalyst },
       { type: AgentType.RISK_MANAGER, result: agentResults.riskManager },
-      { type: AgentType.PORTFOLIO_MANAGER, result: agentResults.portfolioManager },
+      {
+        type: AgentType.PORTFOLIO_MANAGER,
+        result: agentResults.portfolioManager,
+      },
     ];
 
     for (const { type, result } of agentTypeMap) {
@@ -160,7 +147,9 @@ async function persistDebate(
             agentType: type,
             content: JSON.stringify(result.data),
             structuredOutput: JSON.parse(JSON.stringify(result.data)),
-            confidence: (result.data as { confidence?: number } | undefined)?.confidence,
+            confidence: (
+              result.data as { confidence?: number } | undefined
+            )?.confidence,
             latencyMs: result.latencyMs,
           },
         });
@@ -169,7 +158,7 @@ async function persistDebate(
 
     await prisma.auditLog.create({
       data: {
-        userId: effectiveUserId,
+        userId: userId ?? `temp_${output.sessionId}`,
         action: "DEBATE_INIT",
         metadata: {
           sessionId: output.sessionId,

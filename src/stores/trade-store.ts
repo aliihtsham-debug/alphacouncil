@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { FinalRecommendation } from "@/types/agent";
+import { executeSwap, getTransactionStatus } from "@/services/trust-wallet";
 
 export interface Trade {
   id: string;
@@ -20,7 +21,11 @@ interface TradeStore {
   isExecuting: boolean;
   error: string | null;
 
-  executeTrade: (recommendation: FinalRecommendation) => Promise<void>;
+  executeTrade: (
+    recommendation: FinalRecommendation,
+    walletAddress: string,
+    portfolioValueUsd: number
+  ) => Promise<void>;
   rejectTrade: (recommendationId: string) => void;
   resetTrade: () => void;
   clearError: () => void;
@@ -32,42 +37,64 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
   isExecuting: false,
   error: null,
 
-  executeTrade: async (recommendation: FinalRecommendation) => {
+  executeTrade: async (
+    recommendation: FinalRecommendation,
+    walletAddress: string,
+    portfolioValueUsd: number
+  ) => {
     set({ isExecuting: true, error: null });
 
     const tradeId = `trade_${Date.now()}`;
 
     try {
-      // Calculate amount based on allocation and a mock portfolio value
-      // In production, this would come from the actual portfolio
-      const portfolioValue = 12847.53;
-      const allocationValue = (recommendation.allocation / 100) * portfolioValue;
+      // Calculate USD amount from allocation percentage
+      const allocationValue =
+        (recommendation.allocation / 100) * portfolioValueUsd;
 
-      // Get mock price for the token
-      const mockPrices: Record<string, number> = {
-        FET: 1.5,
-        BNB: 283.66,
-        ETH: 3243.0,
-        SOL: 178.5,
-        LINK: 13.33,
-        UNI: 12.45,
-        DOT: 7.85,
-        PEPE: 0.00001234,
-        XRP: 2.34,
-      };
+      // For BUY orders, execute a real swap via Trust Wallet
+      let txHash: string | null = null;
+      let amount = 0;
 
-      const price = mockPrices[recommendation.tokenSymbol] ?? 1;
-      const amount = allocationValue / price;
+      if (recommendation.decision === "BUY") {
+        // Determine the source token (use USDT if available, otherwise BNB)
+        // In production, this should check the user's actual holdings
+        const fromToken = "USDT";
+        const toToken = recommendation.tokenSymbol;
 
-      // Simulate swap execution (in production, call executeSwap from trust-wallet)
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+        // Get the swap amount in the source token
+        const swapAmount = allocationValue.toFixed(2);
 
-      // Generate mock tx hash
-      const txHash =
-        "0x" +
-        Array.from({ length: 64 }, () =>
-          Math.floor(Math.random() * 16).toString(16)
-        ).join("");
+        // Execute real swap
+        const swapResult = await executeSwap({
+          fromToken,
+          toToken,
+          amount: swapAmount,
+          slippage: 0.5,
+          walletAddress,
+        });
+
+        txHash = swapResult.txHash;
+        amount = parseFloat(swapResult.toAmount);
+      } else if (recommendation.decision === "SELL") {
+        // For SELL, swap the token back to USDT
+        const fromToken = recommendation.tokenSymbol;
+        const toToken = "USDT";
+
+        // Estimate amount to sell based on allocation
+        // In production, this should check actual holdings
+        const sellAmount = (allocationValue / 100).toFixed(6); // Rough estimate
+
+        const swapResult = await executeSwap({
+          fromToken,
+          toToken,
+          amount: sellAmount,
+          slippage: 0.5,
+          walletAddress,
+        });
+
+        txHash = swapResult.txHash;
+        amount = parseFloat(swapResult.fromAmount);
+      }
 
       const trade: Trade = {
         id: tradeId,
@@ -93,6 +120,7 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
             action: trade.action,
             amount: trade.amount,
             amountUsd: trade.amountUsd,
+            txHash: trade.txHash,
           }),
         });
       } catch (apiError) {
@@ -105,18 +133,10 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
         isExecuting: false,
       }));
 
-      // Simulate confirmation after a delay
-      setTimeout(() => {
-        set((state) => ({
-          trades: state.trades.map((t) =>
-            t.id === tradeId ? { ...t, status: "CONFIRMED" as const } : t
-          ),
-          activeTrade:
-            state.activeTrade?.id === tradeId
-              ? { ...state.activeTrade, status: "CONFIRMED" as const }
-              : state.activeTrade,
-        }));
-      }, 3000);
+      // Poll for transaction confirmation
+      if (txHash) {
+        pollTransactionStatus(tradeId, txHash);
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Trade execution failed";
@@ -139,9 +159,8 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
     }
   },
 
-  rejectTrade: (recommendationId: string) => {
-    // In production: POST to /api/recommendation with rejected status
-    console.log("Trade rejected:", recommendationId);
+  rejectTrade: (_recommendationId: string) => {
+    // Trade rejected — no action needed
   },
 
   resetTrade: () => {
@@ -152,3 +171,48 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
     set({ error: null });
   },
 }));
+
+/**
+ * Poll for transaction confirmation status.
+ */
+function pollTransactionStatus(tradeId: string, txHash: string) {
+  const maxAttempts = 60; // 5 minutes (5s interval)
+  let attempts = 0;
+
+  const interval = setInterval(async () => {
+    attempts++;
+    try {
+      const status = await getTransactionStatus(txHash);
+
+      if (status === "confirmed") {
+        clearInterval(interval);
+        useTradeStore.setState((state) => ({
+          trades: state.trades.map((t) =>
+            t.id === tradeId ? { ...t, status: "CONFIRMED" as const } : t
+          ),
+          activeTrade:
+            state.activeTrade?.id === tradeId
+              ? { ...state.activeTrade, status: "CONFIRMED" as const }
+              : state.activeTrade,
+        }));
+      } else if (status === "failed") {
+        clearInterval(interval);
+        useTradeStore.setState((state) => ({
+          trades: state.trades.map((t) =>
+            t.id === tradeId ? { ...t, status: "FAILED" as const } : t
+          ),
+          activeTrade:
+            state.activeTrade?.id === tradeId
+              ? { ...state.activeTrade, status: "FAILED" as const }
+              : state.activeTrade,
+        }));
+      }
+    } catch (error) {
+      console.error("Error polling tx status:", error);
+    }
+
+    if (attempts >= maxAttempts) {
+      clearInterval(interval);
+    }
+  }, 5000);
+}

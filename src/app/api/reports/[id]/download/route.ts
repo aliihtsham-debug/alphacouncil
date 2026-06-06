@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { exportToPdf } from "@/services/reports/export";
 
 export async function GET(
   _request: NextRequest,
@@ -23,18 +24,34 @@ export async function GET(
       );
     }
 
-    const isPdf = report.format === "PDF";
-    const contentType = isPdf ? "application/pdf" : "text/markdown";
-    const extension = isPdf ? "pdf" : "md";
-    const filename = `alpha-council-${report.type.toLowerCase()}-${report.id.slice(0, 8)}.${extension}`;
+    if (report.format === "PDF") {
+      // Generate real PDF
+      const pdfBuffer = await exportToPdf({
+        id: report.id,
+        type: report.type as "INVESTMENT" | "WEEKLY_REBALANCE" | "PORTFOLIO_HEALTH",
+        format: "PDF",
+        content: report.content,
+        createdAt: report.createdAt.toISOString(),
+      });
 
-    // For PDF, we return the content as a downloadable blob
-    // In production, this would use a proper PDF generation library
-    const blob = new Blob([report.content], { type: contentType });
+      const filename = `alpha-council-${report.type.toLowerCase()}-${report.id.slice(0, 8)}.pdf`;
+
+      return new Response(pdfBuffer, {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Length": pdfBuffer.length.toString(),
+        },
+      });
+    }
+
+    // Markdown download
+    const filename = `alpha-council-${report.type.toLowerCase()}-${report.id.slice(0, 8)}.md`;
+    const blob = new Blob([report.content], { type: "text/markdown" });
 
     return new Response(blob, {
       headers: {
-        "Content-Type": contentType,
+        "Content-Type": "text/markdown",
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Content-Length": blob.size.toString(),
       },

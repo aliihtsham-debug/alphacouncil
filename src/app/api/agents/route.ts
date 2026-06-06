@@ -4,12 +4,12 @@ import { getMarketOverview } from "@/services/coinmarketcap";
 import { prisma } from "@/lib/prisma";
 import { AgentType } from "@/types/agent";
 
-export const maxDuration = 120; // 2 min max for Vercel
+export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { prompt, portfolio, userId } = body;
+    const { prompt, portfolio } = body;
 
     if (!prompt) {
       return NextResponse.json(
@@ -17,6 +17,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    // Get userId from middleware header
+    const userId = request.headers.get("x-user-id") ?? undefined;
 
     // Get market data
     const marketOverview = await getMarketOverview();
@@ -37,19 +40,9 @@ export async function POST(request: NextRequest) {
 
     // Persist to database
     try {
-      let effectiveUserId = userId;
-      if (!effectiveUserId) {
-        const anonUser = await prisma.user.create({
-          data: {
-            walletAddress: `anon_${result.sessionId}`,
-          },
-        });
-        effectiveUserId = anonUser.id;
-      }
-
       const recommendation = await prisma.recommendation.create({
         data: {
-          userId: effectiveUserId,
+          userId: userId ?? `temp_${result.sessionId}`,
           prompt,
           decision: result.recommendation.decision,
           tokenSymbol: result.recommendation.tokenSymbol,
@@ -64,13 +57,30 @@ export async function POST(request: NextRequest) {
       const agentResults = result.agentResults;
       const agentTypeMap: Array<{
         type: AgentType;
-        result: { success: boolean; data?: unknown; error?: string; latencyMs: number };
+        result: {
+          success: boolean;
+          data?: unknown;
+          error?: string;
+          latencyMs: number;
+        };
       }> = [
-        { type: AgentType.MARKET_RESEARCH, result: agentResults.marketResearch },
-        { type: AgentType.BULL_ANALYST, result: agentResults.bullAnalyst },
-        { type: AgentType.BEAR_ANALYST, result: agentResults.bearAnalyst },
+        {
+          type: AgentType.MARKET_RESEARCH,
+          result: agentResults.marketResearch,
+        },
+        {
+          type: AgentType.BULL_ANALYST,
+          result: agentResults.bullAnalyst,
+        },
+        {
+          type: AgentType.BEAR_ANALYST,
+          result: agentResults.bearAnalyst,
+        },
         { type: AgentType.RISK_MANAGER, result: agentResults.riskManager },
-        { type: AgentType.PORTFOLIO_MANAGER, result: agentResults.portfolioManager },
+        {
+          type: AgentType.PORTFOLIO_MANAGER,
+          result: agentResults.portfolioManager,
+        },
       ];
 
       for (const { type, result: r } of agentTypeMap) {
@@ -81,7 +91,9 @@ export async function POST(request: NextRequest) {
               agentType: type,
               content: JSON.stringify(r.data),
               structuredOutput: r.data as unknown as object,
-              confidence: (r.data as { confidence?: number } | undefined)?.confidence,
+              confidence: (
+                r.data as { confidence?: number } | undefined
+              )?.confidence,
               latencyMs: r.latencyMs,
             },
           });
@@ -90,7 +102,7 @@ export async function POST(request: NextRequest) {
 
       await prisma.auditLog.create({
         data: {
-          userId: effectiveUserId,
+          userId: userId ?? `temp_${result.sessionId}`,
           action: "DEBATE_INIT",
           metadata: {
             sessionId: result.sessionId,

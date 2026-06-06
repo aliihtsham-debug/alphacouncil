@@ -11,12 +11,12 @@ const createSchema = z.object({
   action: z.enum(["BUY", "HOLD", "SELL"]),
   amount: z.number().positive(),
   amountUsd: z.number().positive(),
-  userId: z.string().optional(),
+  txHash: z.string().optional(),
 });
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.nextUrl.searchParams.get("userId");
+    const userId = request.headers.get("x-user-id") ?? request.nextUrl.searchParams.get("userId");
 
     const data = await prisma.executedTrade.findMany({
       where: userId ? { userId } : undefined,
@@ -68,10 +68,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { recommendationId, tokenSymbol, action, amount, amountUsd, userId } =
+    const { recommendationId, tokenSymbol, action, amount, amountUsd, txHash } =
       parsed.data;
 
-    // Fetch the recommendation to get userId if not provided
+    // Get userId from middleware header
+    const userId = request.headers.get("x-user-id");
+
+    // Fetch the recommendation to get userId if not from header
     const recommendation = await prisma.recommendation.findUnique({
       where: { id: recommendationId },
     });
@@ -85,18 +88,11 @@ export async function POST(request: NextRequest) {
 
     const effectiveUserId = userId ?? recommendation.userId;
 
-    // Execute via Trust Wallet SDK (demo mode returns mock txHash)
-    const mockTxHash =
-      "0x" +
-      Array.from({ length: 64 }, () =>
-        Math.floor(Math.random() * 16).toString(16)
-      ).join("");
-
     const trade = await prisma.executedTrade.create({
       data: {
         recommendationId,
         userId: effectiveUserId,
-        txHash: mockTxHash,
+        txHash: txHash ?? null,
         tokenSymbol,
         action,
         amount,
@@ -123,7 +119,7 @@ export async function POST(request: NextRequest) {
           action,
           amount,
           amountUsd,
-          txHash: mockTxHash,
+          txHash: txHash ?? null,
         },
       },
     });
@@ -137,7 +133,7 @@ export async function POST(request: NextRequest) {
         action,
         amount,
         amountUsd,
-        txHash: mockTxHash,
+        txHash: txHash ?? null,
         status: "SUBMITTED",
         createdAt: trade.createdAt,
       },

@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0; // No cache for recommendations
+export const revalidate = 0;
 
 const createSchema = z.object({
   sessionId: z.string().optional(),
@@ -15,12 +15,11 @@ const createSchema = z.object({
   investmentThesis: z.string().min(1),
   supportingArguments: z.array(z.string()).optional(),
   risks: z.array(z.string()).optional(),
-  userId: z.string().optional(),
 });
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = request.nextUrl.searchParams.get("userId");
+    const userId = request.headers.get("x-user-id") ?? request.nextUrl.searchParams.get("userId");
 
     const data = await prisma.recommendation.findMany({
       where: userId ? { userId } : undefined,
@@ -76,23 +75,21 @@ export async function POST(request: NextRequest) {
       investmentThesis,
       supportingArguments,
       risks,
-      userId,
     } = parsed.data;
 
-    // Ensure user exists
-    let effectiveUserId = userId;
-    if (!effectiveUserId) {
-      const anonUser = await prisma.user.create({
-        data: {
-          walletAddress: `anon_${Date.now()}`,
-        },
-      });
-      effectiveUserId = anonUser.id;
+    // Get userId from middleware header
+    const userId = request.headers.get("x-user-id");
+
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required" },
+        { status: 401 }
+      );
     }
 
     const recommendation = await prisma.recommendation.create({
       data: {
-        userId: effectiveUserId,
+        userId,
         prompt: `${decision} ${tokenSymbol}`,
         decision,
         tokenSymbol,
@@ -104,10 +101,9 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Audit log
     await prisma.auditLog.create({
       data: {
-        userId: effectiveUserId,
+        userId,
         action: "RECOMMENDATION_CREATED",
         metadata: {
           recommendationId: recommendation.id,

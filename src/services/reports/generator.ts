@@ -51,7 +51,7 @@ export function generateReport(data: ReportData): GeneratedReport {
   const content = generateMarkdownContent(data);
 
   return {
-    id: `report_${Date.now()}`,
+    id: `report_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
     type: data.type,
     format: data.format,
     content,

@@ -33,6 +33,12 @@ const envSchema = z.object({
     .url()
     .default("https://pro-api.coinmarketcap.com/v1"),
 
+  // ─── Auth ────────────────────────────
+  SESSION_SECRET: z.string().min(32),
+
+  // ─── Blockchain ──────────────────────
+  BSCSCAN_API_KEY: z.string().min(1),
+
   // ─── Monitoring ──────────────────────
   SENTRY_DSN: z.string().optional(),
   NEXT_PUBLIC_SENTRY_DSN: z.string().optional(),

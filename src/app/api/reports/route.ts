@@ -9,7 +9,6 @@ const createSchema = z.object({
   type: z.enum(["INVESTMENT", "WEEKLY_REBALANCE", "PORTFOLIO_HEALTH"]),
   format: z.enum(["PDF", "MARKDOWN"]).default("MARKDOWN"),
   recommendationId: z.string().optional(),
-  userId: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -28,7 +27,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { type, format, recommendationId, userId } = parsed.data;
+    const { type, format, recommendationId } = parsed.data;
+
+    // Get userId from middleware header
+    const userId = request.headers.get("x-user-id");
+
+    if (!userId) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required" },
+        { status: 401 }
+      );
+    }
 
     // Fetch recommendation data if provided
     let recommendationData;
@@ -39,7 +48,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Generate report content
     const reportResult = generateReport({
       type,
       format: format as "PDF" | "MARKDOWN",
@@ -57,31 +65,18 @@ export async function POST(request: NextRequest) {
     });
     const content = reportResult.content;
 
-    // Ensure user exists
-    let effectiveUserId = userId;
-    if (!effectiveUserId) {
-      const anonUser = await prisma.user.create({
-        data: {
-          walletAddress: `anon_${Date.now()}`,
-        },
-      });
-      effectiveUserId = anonUser.id;
-    }
-
-    // Persist report
     const report = await prisma.report.create({
       data: {
-        userId: effectiveUserId,
+        userId,
         type,
         format,
         content,
       },
     });
 
-    // Audit log
     await prisma.auditLog.create({
       data: {
-        userId: effectiveUserId,
+        userId,
         action: "REPORT_GENERATED",
         metadata: {
           reportId: report.id,

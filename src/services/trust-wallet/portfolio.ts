@@ -1,123 +1,122 @@
 /**
  * Trust Wallet Portfolio Service
  *
- * Dedicated module for portfolio retrieval logic.
- * Extracted from connect.ts for better separation of concerns.
+ * Fetches real on-chain portfolio data using BSCScan API for balances
+ * and CoinMarketCap + PancakeSwap for prices.
  */
 
 import type { WalletPortfolio, WalletToken } from "./types";
-import { SUPPORTED_CHAINS } from "./types";
-
-// ─── Demo Portfolio (for hackathon demo) ─────────────────
-
-const DEMO_PORTFOLIO: WalletPortfolio = {
-  address: "0x742d35Cc6634C0532924a3b844Bc9e7595f2bD18",
-  chain: "BNB",
-  totalBalanceUsd: 12847.53,
-  tokens: [
-    {
-      contractAddress: null,
-      symbol: "BNB",
-      name: "BNB",
-      decimals: 18,
-      balance: "18.5",
-      balanceUsd: 5247.8,
-      priceUsd: 283.66,
-      percentChange24h: 2.34,
-    },
-    {
-      contractAddress: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
-      symbol: "ETH",
-      name: "Ethereum",
-      decimals: 18,
-      balance: "1.2",
-      balanceUsd: 3891.6,
-      priceUsd: 3243.0,
-      percentChange24h: -1.12,
-    },
-    {
-      contractAddress: "0x031b41e504677879370e9DBcF937283A8691Fa7f",
-      symbol: "FET",
-      name: "Fetch.ai",
-      decimals: 18,
-      balance: "1250",
-      balanceUsd: 1875.0,
-      priceUsd: 1.5,
-      percentChange24h: 5.67,
-    },
-    {
-      contractAddress: "0x55d398326f99059fF775485246999027B3197955",
-      symbol: "USDT",
-      name: "Tether USD",
-      decimals: 18,
-      balance: "1500",
-      balanceUsd: 1500.0,
-      priceUsd: 1.0,
-      percentChange24h: 0.01,
-    },
-    {
-      contractAddress: "0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD",
-      symbol: "LINK",
-      name: "Chainlink",
-      decimals: 18,
-      balance: "25",
-      balanceUsd: 333.13,
-      priceUsd: 13.33,
-      percentChange24h: -0.45,
-    },
-  ],
-  lastUpdated: new Date().toISOString(),
-};
-
-// ─── Portfolio Retrieval ─────────────────────────────────
+import { getBNBBalance, getAllTokenBalances } from "./bscscan";
+import { getTokenPricesWithFallback } from "./price-fetcher";
 
 /**
- * Get portfolio for a wallet address.
- * Returns demo portfolio for the demo address,
- * empty portfolio for unknown addresses.
+ * Get the real portfolio for a wallet address.
+ * Fetches BNB balance, BEP-20 token balances, and current prices.
  */
 export async function getWalletPortfolio(
   address: string,
   chain: string = "BNB"
 ): Promise<WalletPortfolio> {
-  // Demo mode
-  if (address === DEMO_PORTFOLIO.address) {
-    return {
-      ...DEMO_PORTFOLIO,
-      lastUpdated: new Date().toISOString(),
-    };
+  if (chain !== "BNB") {
+    throw new Error(
+      `Unsupported chain: ${chain}. Only BSC is currently supported.`
+    );
   }
 
-  // In production: query BSCScan API or similar indexer
-  // For now, return empty portfolio
+  const tokens: WalletToken[] = [];
+
+  // 1. Fetch BNB balance
+  try {
+    const bnbBalanceWei = await getBNBBalance(address);
+    const bnbBalance = Number(BigInt(bnbBalanceWei)) / 1e18;
+
+    if (bnbBalance > 0) {
+      tokens.push({
+        contractAddress: null,
+        symbol: "BNB",
+        name: "BNB",
+        decimals: 18,
+        balance: bnbBalance.toString(),
+        balanceUsd: 0, // Will be calculated after price fetch
+        priceUsd: 0,
+        percentChange24h: null,
+      });
+    }
+  } catch (error) {
+    console.error("Failed to fetch BNB balance:", error);
+  }
+
+  // 2. Fetch BEP-20 token balances
+  try {
+    const tokenBalances = await getAllTokenBalances(address);
+
+    for (const token of tokenBalances) {
+      const balanceNum =
+        Number(BigInt(token.balance)) / Math.pow(10, token.decimals);
+
+      if (balanceNum > 0) {
+        tokens.push({
+          contractAddress: token.contractAddress,
+          symbol: token.tokenSymbol,
+          name: token.tokenName,
+          decimals: token.decimals,
+          balance: balanceNum.toString(),
+          balanceUsd: 0,
+          priceUsd: 0,
+          percentChange24h: null,
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Failed to fetch token balances:", error);
+  }
+
+  // 3. Fetch prices for all tokens
+  if (tokens.length > 0) {
+    const symbols = tokens.map((t) => t.symbol);
+    try {
+      const prices = await getTokenPricesWithFallback(symbols);
+
+      for (const token of tokens) {
+        const priceData = prices[token.symbol.toUpperCase()];
+        if (priceData) {
+          token.priceUsd = priceData.priceUsd;
+          token.percentChange24h = priceData.percentChange24h;
+          token.balanceUsd = parseFloat(token.balance) * priceData.priceUsd;
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch prices:", error);
+    }
+  }
+
+  // 4. Filter out tokens with no price data and negligible value
+  const validTokens = tokens.filter(
+    (t) => t.priceUsd > 0 && t.balanceUsd > 0.01
+  );
+
+  // 5. Calculate total
+  const totalBalanceUsd = validTokens.reduce(
+    (sum, t) => sum + t.balanceUsd,
+    0
+  );
+
   return {
     address,
     chain,
-    totalBalanceUsd: 0,
-    tokens: [],
+    totalBalanceUsd,
+    tokens: validTokens.sort((a, b) => b.balanceUsd - a.balanceUsd),
     lastUpdated: new Date().toISOString(),
   };
 }
 
 /**
- * Get portfolio with on-chain data (production).
- * This would query RPC nodes or indexer APIs.
+ * Get portfolio with on-chain data (alias for getWalletPortfolio).
  */
 export async function getOnChainPortfolio(
   address: string,
   chain: string = "BNB"
 ): Promise<WalletPortfolio> {
-  const chainConfig = SUPPORTED_CHAINS[chain];
-  if (!chainConfig) {
-    throw new Error(`Unsupported chain: ${chain}`);
-  }
-
-  // In production:
-  // 1. Query BSCScan API for token balances
-  // 2. Fetch prices from CoinMarketCap
-  // 3. Calculate USD values
-
-  // For now, fall back to standard portfolio
   return getWalletPortfolio(address, chain);
 }
 
@@ -128,6 +127,5 @@ export async function refreshPortfolio(
   address: string,
   chain: string = "BNB"
 ): Promise<WalletPortfolio> {
-  // In production: bypass cache, re-fetch from chain
   return getWalletPortfolio(address, chain);
 }
