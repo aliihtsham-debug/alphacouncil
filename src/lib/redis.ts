@@ -1,8 +1,8 @@
 /**
  * Redis Client
  *
- * Uses ioredis when REDIS_URL is set, otherwise exports no-op wrappers
- * so the app works without a Redis connection (dev/demo mode).
+ * Uses ioredis when REDIS_URL is set to a valid URL, otherwise exports
+ * no-op wrappers so the app works without a Redis connection (dev/demo mode).
  */
 
 // ─── No-op fallback ─────────────────────────────────────
@@ -37,37 +37,41 @@ const noOpRedis: RedisLike = {
   },
 };
 
-// ─── Client initialization ──────────────────────────────
+// ─── Client initialization ──────────────
+
+function isValidRedisUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "redis:" || parsed.protocol === "rediss:";
+  } catch {
+    return false;
+  }
+}
 
 function createRedisClient(): RedisLike {
-  const url = process.env.REDIS_URL;
+  const url = process.env.REDIS_URL?.trim();
 
-  if (!url) {
-    console.log("⚠️  REDIS_URL not set — using no-op Redis client");
+  if (!url || !isValidRedisUrl(url)) {
     return noOpRedis;
   }
 
   try {
-    // Dynamic require so build succeeds without ioredis installed
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const Redis = require("ioredis") as new (url: string, opts: Record<string, unknown>) => RedisLike;
     const client = new Redis(url, {
-      maxRetriesPerRequest: 3,
-      retryStrategy(times: number) {
-        if (times > 3) return null; // stop retrying
-        return Math.min(times * 200, 1000);
-      },
+      maxRetriesPerRequest: 0,
+      retryStrategy: () => null, // don't retry
       lazyConnect: true,
+      enableOfflineQueue: false,
+      connectTimeout: 2000,
     });
 
-    client.on("error", (...args: unknown[]) => {
-      const err = args[0] as { message: string };
-      console.error("Redis error:", err?.message ?? args[0]);
+    client.on("error", () => {
+      // Suppress connection errors — app works without Redis
     });
 
     return client;
-  } catch (error) {
-    console.error("Failed to create Redis client:", error);
+  } catch {
     return noOpRedis;
   }
 }
@@ -77,11 +81,11 @@ export const redis: RedisLike = createRedisClient();
 // ─── Cache helpers ──────────────────────────────────────
 
 export const CACHE_TTL = {
-  MARKET_DATA: 60, // 1 minute
-  CATEGORIES: 3600, // 1 hour
-  TRENDING: 120, // 2 minutes
-  SESSION: 300, // 5 minutes
-  PORTFOLIO: 30, // 30 seconds
+  MARKET_DATA: 60,
+  CATEGORIES: 3600,
+  TRENDING: 120,
+  SESSION: 300,
+  PORTFOLIO: 30,
 } as const;
 
 /**
@@ -92,13 +96,17 @@ export async function getOrSet<T>(
   ttl: number,
   fetcher: () => Promise<T>
 ): Promise<T> {
-  const cached = await redis.get(key);
-  if (cached) {
-    try {
-      return JSON.parse(cached) as T;
-    } catch {
-      // Invalid JSON, refetch
+  try {
+    const cached = await redis.get(key);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as T;
+      } catch {
+        // Invalid JSON, refetch
+      }
     }
+  } catch {
+    // Redis read failed, continue to fetch
   }
 
   const data = await fetcher();
