@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTrendingTokens } from "@/services/coinmarketcap";
 
+export const dynamic = "force-dynamic";
 export const revalidate = 120; // 2 min cache
 
 export async function GET(request: NextRequest) {

@@ -3,6 +3,7 @@ import { getWalletPortfolio } from "@/services/trust-wallet";
 import { analyzePortfolio } from "@/services/portfolio/analyzer";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
 export const revalidate = 30; // 30s cache
 
 export async function GET(request: NextRequest) {
