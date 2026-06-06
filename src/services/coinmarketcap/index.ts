@@ -10,8 +10,12 @@ import * as cache from "./cache";
 import { mockTokens, mockCategories, mockGlobalMetrics } from "./mock-data";
 import type { CMCToken, CMCCategory } from "./types";
 
-function useMock() {
-  return !getEnv().COINMARKETCAP_API_KEY;
+function useMock(): boolean {
+  try {
+    return !getEnv().COINMARKETCAP_API_KEY;
+  } catch {
+    return true; // Fall back to mock if env validation fails
+  }
 }
 
 // ─── Market Overview type ───────────────────────────────

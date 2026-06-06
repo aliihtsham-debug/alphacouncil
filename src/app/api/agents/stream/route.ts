@@ -3,7 +3,7 @@
  *
  * Returns a ReadableStream that streams events as they happen.
  * Client connects via fetch + ReadableStream (use-debate hook).
- * Persists debate results to the database via Prisma.
+ * Persists debate results to the database via Prisma (when DATABASE_URL is configured).
  */
 
 import { NextRequest } from "next/server";
@@ -66,8 +66,10 @@ export async function POST(request: NextRequest) {
             (event) => sendEvent(event as Record<string, unknown>)
           );
 
-          // Persist to database after successful debate
-          await persistDebate(userId, prompt, orchestratorOutput);
+          // Persist to database after successful debate (non-blocking)
+          persistDebate(userId, prompt, orchestratorOutput).catch(() => {
+            // Silently fail — don't break the stream for DB errors
+          });
         } catch (error) {
           sendEvent({
             type: "error",
@@ -89,15 +91,15 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("SSE stream error:", error);
+    const message = error instanceof Error ? error.message : "Stream failed";
+    const stack = error instanceof Error ? error.stack : undefined;
+    console.error("SSE stream error:", message, stack);
     Sentry.captureException(error);
     return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : "Stream failed",
-      }),
+      `data: ${JSON.stringify({ type: "error", message })}\n\n`,
       {
-        status: 500,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
+        status: 200,
+        headers: { "Content-Type": "text/event-stream", ...corsHeaders },
       }
     );
   }
@@ -105,6 +107,7 @@ export async function POST(request: NextRequest) {
 
 /**
  * Persist the full debate to the database.
+ * Runs as fire-and-forget — errors are logged but don't break the stream.
  */
 async function persistDebate(
   userId: string | undefined,
@@ -112,7 +115,7 @@ async function persistDebate(
   output: Awaited<ReturnType<Orchestrator["runWithEvents"]>>
 ) {
   try {
-    // Ensure user exists (upsert by wallet address or create anonymous)
+    // Ensure user exists
     let effectiveUserId = userId;
     if (!effectiveUserId) {
       const anonUser = await prisma.user.create({
@@ -123,7 +126,6 @@ async function persistDebate(
       effectiveUserId = anonUser.id;
     }
 
-    // Create recommendation
     const recommendation = await prisma.recommendation.create({
       data: {
         userId: effectiveUserId,
@@ -138,7 +140,6 @@ async function persistDebate(
       },
     });
 
-    // Persist agent debates
     const agentResults = output.agentResults;
     const agentTypeMap: Array<{
       type: AgentType;
@@ -158,7 +159,7 @@ async function persistDebate(
             recommendationId: recommendation.id,
             agentType: type,
             content: JSON.stringify(result.data),
-            structuredOutput: result.data as unknown as object,
+            structuredOutput: JSON.parse(JSON.stringify(result.data)),
             confidence: (result.data as { confidence?: number } | undefined)?.confidence,
             latencyMs: result.latencyMs,
           },
@@ -166,7 +167,6 @@ async function persistDebate(
       }
     }
 
-    // Audit log
     await prisma.auditLog.create({
       data: {
         userId: effectiveUserId,

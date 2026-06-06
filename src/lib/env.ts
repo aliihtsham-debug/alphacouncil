@@ -42,14 +42,19 @@ const envSchema = z.object({
 
 type Env = z.infer<typeof envSchema>;
 
+// In serverless (Vercel), don't cache — env vars are injected per-request
+// In dev, cache for performance across hot reloads
+const isServerless = process.env.VERCEL === "1" || process.env.NOW_REGION !== undefined;
+
 let cachedEnv: Env | null = null;
 
 /**
- * Validate and return env vars. Lazy — only runs on first call,
- * so process.env is fully populated by Next.js at request time.
+ * Validate and return env vars.
+ * In serverless environments, re-validates each call (no cache).
+ * In dev, caches after first call for hot-reload performance.
  */
 export function getEnv(): Env {
-  if (cachedEnv) return cachedEnv;
+  if (!isServerless && cachedEnv) return cachedEnv;
 
   const parsed = envSchema.safeParse(process.env);
 
@@ -59,6 +64,9 @@ export function getEnv(): Env {
     throw new Error("Invalid environment variables");
   }
 
-  cachedEnv = parsed.data;
-  return cachedEnv;
+  if (!isServerless) {
+    cachedEnv = parsed.data;
+  }
+
+  return parsed.data;
 }
