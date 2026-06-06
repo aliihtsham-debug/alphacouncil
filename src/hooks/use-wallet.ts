@@ -15,6 +15,19 @@ export function useWallet() {
       setConnecting(true);
       const state = await connectWallet("BNB");
       storeConnect(state.address!, "BNB");
+
+      // Create or fetch user in database
+      if (state.address) {
+        try {
+          await fetch("/api/portfolio", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ address: state.address, chain: "BNB" }),
+          });
+        } catch (dbError) {
+          console.error("Failed to create user record:", dbError);
+        }
+      }
     } catch (error) {
       console.error("Wallet connection failed:", error);
       throw error;

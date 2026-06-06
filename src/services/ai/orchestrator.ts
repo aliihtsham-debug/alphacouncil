@@ -4,7 +4,7 @@
  * Manages the multi-agent debate pipeline:
  * 1. Market Research → 2. [Bull ∥ Bear] → 3. Risk Manager → 4. Portfolio Manager
  *
- * Supports SSE streaming for real-time updates.
+ * Supports SSE streaming for real-time updates including per-token streaming.
  */
 
 import { MarketResearchAgent } from "./agents/market-research";
@@ -53,6 +53,7 @@ export interface OrchestratorOutput {
 export type OrchestratorEvent =
   | { type: "session_start"; sessionId: string }
   | { type: "agent_start"; agent: AgentType }
+  | { type: "agent_token"; agent: AgentType; token: string }
   | { type: "agent_end"; agent: AgentType; output: unknown; latencyMs: number }
   | { type: "agent_error"; agent: AgentType; error: string }
   | { type: "final"; recommendation: FinalRecommendation }
@@ -112,13 +113,20 @@ export class Orchestrator {
         throw new Error("No candidate tokens found");
       }
 
-      // ─── Step 2a: Bull Analyst ──────────────────────────
+      // ─── Step 2a & 2b: Bull ∥ Bear (parallel) ──────────
       onEvent({ type: "agent_start", agent: AgentType.BULL_ANALYST });
+      onEvent({ type: "agent_start", agent: AgentType.BEAR_ANALYST });
 
-      const bullResult = await this.bullAnalystAgent.execute({
-        candidateToken: topCandidate,
-        marketSummary: marketResult.data.marketSummary,
-      });
+      const [bullResult, bearResult] = await Promise.all([
+        this.bullAnalystAgent.execute({
+          candidateToken: topCandidate,
+          marketSummary: marketResult.data.marketSummary,
+        }),
+        this.bearAnalystAgent.execute({
+          candidateToken: topCandidate,
+          marketSummary: marketResult.data.marketSummary,
+        }),
+      ]);
 
       if (bullResult.success && bullResult.data) {
         onEvent({
@@ -135,21 +143,11 @@ export class Orchestrator {
         });
       }
 
-      // Use defaults if bull failed
       const bullOutput: BullAnalystAgentOutput = bullResult.data ?? {
         bullishArguments: ["Market research identified this as a top candidate"],
         opportunityScore: topCandidate.score,
         confidence: 50,
       };
-
-      // ─── Step 2b: Bear Analyst (with Bull's output) ─────
-      onEvent({ type: "agent_start", agent: AgentType.BEAR_ANALYST });
-
-      const bearResult = await this.bearAnalystAgent.execute({
-        candidateToken: topCandidate,
-        bullArguments: bullOutput.bullishArguments,
-        marketSummary: marketResult.data.marketSummary,
-      });
 
       if (bearResult.success && bearResult.data) {
         onEvent({

@@ -27,8 +27,8 @@ export const cacheKeys = {
 
 // ─── Cached fetchers ─────────────────────────────────────
 
-export async function getCachedMarketOverview(
-  fetcher: () => Promise<unknown>
+export async function getCachedMarketOverview<T>(
+  fetcher: () => Promise<T>
 ) {
   return getOrSet(
     cacheKeys.marketOverview(),
@@ -37,9 +37,9 @@ export async function getCachedMarketOverview(
   );
 }
 
-export async function getCachedTrending(
+export async function getCachedTrending<T>(
   limit: number,
-  fetcher: () => Promise<unknown>
+  fetcher: () => Promise<T>
 ) {
   return getOrSet(
     cacheKeys.trending(limit),
@@ -48,9 +48,9 @@ export async function getCachedTrending(
   );
 }
 
-export async function getCachedGainers(
+export async function getCachedGainers<T>(
   limit: number,
-  fetcher: () => Promise<unknown>
+  fetcher: () => Promise<T>
 ) {
   return getOrSet(
     cacheKeys.gainers(limit),
@@ -59,9 +59,9 @@ export async function getCachedGainers(
   );
 }
 
-export async function getCachedLosers(
+export async function getCachedLosers<T>(
   limit: number,
-  fetcher: () => Promise<unknown>
+  fetcher: () => Promise<T>
 ) {
   return getOrSet(
     cacheKeys.losers(limit),
@@ -70,10 +70,10 @@ export async function getCachedLosers(
   );
 }
 
-export async function getCachedTokensByCategory(
+export async function getCachedTokensByCategory<T>(
   category: string,
   limit: number,
-  fetcher: () => Promise<unknown>
+  fetcher: () => Promise<T>
 ) {
   return getOrSet(
     cacheKeys.tokensByCategory(category, limit),
@@ -82,8 +82,8 @@ export async function getCachedTokensByCategory(
   );
 }
 
-export async function getCachedCategories(
-  fetcher: () => Promise<unknown>
+export async function getCachedCategories<T>(
+  fetcher: () => Promise<T>
 ) {
   return getOrSet(
     cacheKeys.categories(),
@@ -92,9 +92,9 @@ export async function getCachedCategories(
   );
 }
 
-export async function getCachedTokenBySymbol(
+export async function getCachedTokenBySymbol<T>(
   symbol: string,
-  fetcher: () => Promise<unknown>
+  fetcher: () => Promise<T>
 ) {
   return getOrSet(
     cacheKeys.tokenBySymbol(symbol),

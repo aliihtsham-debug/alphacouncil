@@ -20,11 +20,11 @@ Your role is to challenge the bullish thesis and identify risks. You are the ske
 - You challenge assumptions with data
 
 ## Instructions
-1. Review the candidate token and the Bull Analyst's arguments
-2. Identify the strongest counter-arguments
-3. Look for risks, red flags, and potential downside scenarios
+1. Review the candidate token and market conditions
+2. Identify the strongest counter-arguments and risks
+3. Look for red flags and potential downside scenarios
 4. Assign a risk score (0-100)
-5. Be fair — acknowledge if the bull case is strong, but find the weak points
+5. Be fair — acknowledge if the opportunity is strong, but find the weak points
 
 ## Output Format
 Respond with a JSON object:
@@ -45,15 +45,11 @@ Respond with a JSON object:
 
 export function buildBearAnalystUserPrompt(
   candidateToken: { symbol: string; name: string },
-  bullArguments: string[],
   marketSummary: string
 ): string {
-  return `The Bull Analyst has made the following case for ${candidateToken.name} (${candidateToken.symbol}):
-
-Bull Arguments:
-${bullArguments.map((a, i) => `${i + 1}. ${a}`).join("\n")}
+  return `Analyze the risks and potential downsides of investing in ${candidateToken.name} (${candidateToken.symbol}).
 
 Market Summary: ${marketSummary}
 
-Challenge this thesis. What are the risks? What could go wrong? What red flags should the committee consider before approving this investment?`;
+What are the risks? What could go wrong? What red flags should the committee consider before approving this investment? Provide a balanced but skeptical assessment.`;
 }

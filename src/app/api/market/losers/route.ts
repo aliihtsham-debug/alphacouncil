@@ -1,24 +1,22 @@
 /**
  * GET /api/market/losers — Top 24h losers
- * Redirects to the tokens endpoint with type=losers
  */
 
 import { NextResponse } from "next/server";
+import { getTopLosers } from "@/services/coinmarketcap";
 
 export const revalidate = 60;
 
 export async function GET() {
-  // Fetch from the existing tokens endpoint
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
-  const url = `${baseUrl}/api/market/tokens?type=losers`;
-
   try {
-    const res = await fetch(url, { next: { revalidate: 60 } });
-    const result = await res.json();
-
-    return NextResponse.json(result);
+    const data = await getTopLosers(20);
+    return NextResponse.json({
+      success: true,
+      data,
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
-    console.error("Losers proxy error:", error);
+    console.error("Losers error:", error);
     return NextResponse.json(
       {
         success: false,

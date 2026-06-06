@@ -4,41 +4,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { z } from "zod";
 
-// ─── Mock data store (replaced by Prisma later) ──────────
-
-const mockRecommendations = new Map<string, {
-  id: string;
-  prompt: string;
-  decision: string;
-  tokenSymbol: string;
-  tokenName: string;
-  allocation: number;
-  confidence: number;
-  investmentThesis: string;
-  status: string;
-  createdAt: string;
-  agentDebates: Array<{
-    agentType: string;
-    content: string;
-    confidence?: number;
-    latencyMs?: number;
-  }>;
-}>();
-
-// Seed with sample data
-mockRecommendations.set("rec_sample_1", {
-  id: "rec_sample_1",
-  prompt: "Find the best AI token opportunity",
-  decision: "BUY",
-  tokenSymbol: "FET",
-  tokenName: "Fetch.ai",
-  allocation: 8,
-  confidence: 87,
-  investmentThesis: "Fetch.ai demonstrates strong momentum in the AI narrative.",
-  status: "PENDING",
-  createdAt: new Date().toISOString(),
-  agentDebates: [],
+const updateSchema = z.object({
+  status: z.enum(["PENDING", "APPROVED", "REJECTED", "MODIFIED", "EXPIRED"]),
+  userId: z.string().optional(),
 });
 
 // ─── GET ─────────────────────────────────────────────────
@@ -48,20 +19,41 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const rec = mockRecommendations.get(id);
 
-  if (!rec) {
+  try {
+    const rec = await prisma.recommendation.findUnique({
+      where: { id },
+      include: {
+        agentDebates: {
+          orderBy: { createdAt: "asc" },
+        },
+        executedTrade: true,
+      },
+    });
+
+    if (!rec) {
+      return NextResponse.json(
+        { success: false, error: "Recommendation not found" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: rec,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Recommendation fetch error:", error);
     return NextResponse.json(
-      { success: false, error: "Recommendation not found" },
-      { status: 404 }
+      {
+        success: false,
+        error: "Failed to fetch recommendation",
+        timestamp: new Date().toISOString(),
+      },
+      { status: 500 }
     );
   }
-
-  return NextResponse.json({
-    success: true,
-    data: rec,
-    timestamp: new Date().toISOString(),
-  });
 }
 
 // ─── PUT ─────────────────────────────────────────────────
@@ -71,39 +63,73 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const rec = mockRecommendations.get(id);
-
-  if (!rec) {
-    return NextResponse.json(
-      { success: false, error: "Recommendation not found" },
-      { status: 404 }
-    );
-  }
 
   try {
-    const body = await request.json();
-    const { status } = body;
+    const rec = await prisma.recommendation.findUnique({
+      where: { id },
+    });
 
-    const validStatuses = ["PENDING", "APPROVED", "REJECTED", "MODIFIED", "EXPIRED"];
-    if (!validStatuses.includes(status)) {
+    if (!rec) {
       return NextResponse.json(
-        { success: false, error: `Invalid status: ${status}` },
+        { success: false, error: "Recommendation not found" },
+        { status: 404 }
+      );
+    }
+
+    const body = await request.json();
+    const parsed = updateSchema.safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid request body",
+          details: parsed.error.flatten(),
+        },
         { status: 400 }
       );
     }
 
-    rec.status = status;
-    mockRecommendations.set(id, rec);
+    const { status, userId } = parsed.data;
+
+    const updated = await prisma.recommendation.update({
+      where: { id },
+      data: { status },
+      include: {
+        agentDebates: {
+          orderBy: { createdAt: "asc" },
+        },
+        executedTrade: true,
+      },
+    });
+
+    // Audit log
+    await prisma.auditLog.create({
+      data: {
+        userId: userId ?? rec.userId,
+        action: "RECOMMENDATION_STATUS_UPDATE",
+        metadata: {
+          recommendationId: id,
+          oldStatus: rec.status,
+          newStatus: status,
+        },
+      },
+    });
 
     return NextResponse.json({
       success: true,
-      data: rec,
+      data: updated,
       timestamp: new Date().toISOString(),
     });
-  } catch {
+  } catch (error) {
+    console.error("Recommendation update error:", error);
     return NextResponse.json(
-      { success: false, error: "Invalid request body" },
-      { status: 400 }
+      {
+        success: false,
+        error: "Failed to update recommendation",
+        timestamp: new Date().toISOString(),
+      },
+      { status: 500 }
     );
   }
 }

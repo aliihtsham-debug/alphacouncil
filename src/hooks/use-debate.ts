@@ -12,6 +12,7 @@ import type { AgentType, FinalRecommendation } from "@/types/agent";
 type DebateEvent =
   | { type: "session_start"; sessionId: string }
   | { type: "agent_start"; agent: AgentType }
+  | { type: "agent_token"; agent: AgentType; token: string }
   | { type: "agent_end"; agent: AgentType; output: unknown; latencyMs: number }
   | { type: "agent_error"; agent: AgentType; error: string }
   | { type: "final"; recommendation: FinalRecommendation }
@@ -158,6 +159,10 @@ export function useDebate() {
           setAgentThinking(event.agent);
           break;
 
+        case "agent_token":
+          setAgentStreaming(event.agent);
+          break;
+
         case "agent_end":
           setAgentOutput(event.agent, event.output as never, event.latencyMs);
           break;
@@ -184,6 +189,7 @@ export function useDebate() {
     },
     [
       setAgentThinking,
+      setAgentStreaming,
       setAgentOutput,
       setAgentError,
       setFinalRecommendation,

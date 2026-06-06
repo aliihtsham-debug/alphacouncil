@@ -2,6 +2,7 @@
  * Bear Analyst Agent
  *
  * Challenges the bullish thesis. Identifies risks and red flags.
+ * Runs independently (in parallel with Bull Analyst).
  */
 
 import { z } from "zod";
@@ -17,7 +18,6 @@ export interface BearAnalystInput {
     symbol: string;
     name: string;
   };
-  bullArguments: string[];
   marketSummary: string;
 }
 
@@ -43,7 +43,6 @@ export class BearAnalystAgent extends BaseAgent<
   protected buildUserPrompt(input: BearAnalystInput): string {
     return buildBearAnalystUserPrompt(
       input.candidateToken,
-      input.bullArguments,
       input.marketSummary
     );
   }

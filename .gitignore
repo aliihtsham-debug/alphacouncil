@@ -52,3 +52,24 @@ sentry.properties
 
 # prisma
 prisma/migrations/migration_lock.toml
+
+# database
+*.db
+*.sqlite
+*.sqlite3
+
+# local env (additional safety)
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini

@@ -3,6 +3,8 @@
  *
  * Primary: OpenRouter (openrouter/owl-alpha)
  * Fallback: OpenAI GPT-4o (optional, used when OpenRouter fails)
+ *
+ * Supports both non-streaming (full response) and streaming (token-by-token) modes.
  */
 
 import { getEnv } from "@/lib/env";
@@ -14,6 +16,11 @@ const MAX_RETRIES = 3;
 interface LLMResponse {
   content: string;
   tokensUsed: number;
+}
+
+export interface StreamChunk {
+  token: string;
+  done: boolean;
 }
 
 /**
@@ -113,7 +120,64 @@ export async function callLLM(
 }
 
 /**
- * Call OpenRouter API (OpenAI-compatible interface).
+ * Stream tokens from the LLM with retry and fallback logic.
+ * Yields individual tokens as they arrive from the SSE stream.
+ */
+export async function* streamLLM(
+  messages: LLMMessage[],
+  options?: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    responseFormat?: { type: "json_object" } | { type: "text" };
+  }
+): AsyncGenerator<StreamChunk, void, unknown> {
+  let lastError: Error | null = null;
+
+  // Try OpenRouter first (primary provider)
+  const openRouterConfig = getOpenRouterConfig();
+  if (openRouterConfig.apiKey) {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        yield* streamOpenRouter(messages, options);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt < MAX_RETRIES) {
+          const delay = Math.pow(2, attempt) * 1000;
+          console.warn(`OpenRouter stream attempt ${attempt + 1} failed, retrying in ${delay}ms:`, lastError.message);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+      }
+    }
+    console.warn("OpenRouter stream exhausted retries, trying OpenAI fallback:", lastError?.message);
+  }
+
+  // Fallback to OpenAI (if configured)
+  const openAIConfig = getOpenAIConfig();
+  if (openAIConfig.apiKey) {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        yield* streamOpenAI(messages, options);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt < MAX_RETRIES) {
+          const delay = Math.pow(2, attempt) * 1000;
+          console.warn(`OpenAI stream attempt ${attempt + 1} failed, retrying in ${delay}ms:`, lastError.message);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+      }
+    }
+  }
+
+  throw lastError ?? new Error(
+    "No LLM API key configured. Set OPENROUTER_API_KEY or OPENAI_API_KEY."
+  );
+}
+
+/**
+ * Call OpenRouter API (OpenAI-compatible interface) — non-streaming.
  */
 async function callOpenRouter(
   messages: LLMMessage[],
@@ -140,6 +204,7 @@ async function callOpenRouter(
       messages,
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.maxTokens ?? 2000,
+      stream: false,
       ...(options?.responseFormat && {
         response_format: options.responseFormat,
       }),
@@ -161,7 +226,7 @@ async function callOpenRouter(
 }
 
 /**
- * Call OpenAI API (fallback).
+ * Call OpenAI API (fallback) — non-streaming.
  */
 async function callOpenAI(
   messages: LLMMessage[],
@@ -185,6 +250,7 @@ async function callOpenAI(
       messages,
       temperature: options?.temperature ?? 0.7,
       max_tokens: options?.maxTokens ?? 2000,
+      stream: false,
       ...(options?.responseFormat && {
         response_format: options.responseFormat,
       }),
@@ -203,6 +269,186 @@ async function callOpenAI(
     content: data.choices[0].message.content,
     tokensUsed: data.usage?.total_tokens ?? 0,
   };
+}
+
+/**
+ * Stream from OpenRouter API — yields tokens as they arrive.
+ */
+async function* streamOpenRouter(
+  messages: LLMMessage[],
+  options?: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    responseFormat?: { type: "json_object" } | { type: "text" };
+  }
+): AsyncGenerator<StreamChunk, void, unknown> {
+  const config = getOpenRouterConfig();
+  const appUrl = getEnv().NEXT_PUBLIC_APP_URL;
+
+  const response = await fetchWithTimeout(`${config.baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`,
+      "HTTP-Referer": appUrl,
+      "X-Title": "Alpha Council",
+    },
+    body: JSON.stringify({
+      model: options?.model ?? config.model,
+      messages,
+      temperature: options?.temperature ?? 0.7,
+      max_tokens: options?.maxTokens ?? 2000,
+      stream: true,
+      ...(options?.responseFormat && {
+        response_format: options.responseFormat,
+      }),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `OpenRouter streaming error: ${response.status} ${response.statusText} — ${errorBody}`
+    );
+  }
+
+  if (!response.body) {
+    throw new Error("OpenRouter response has no body stream");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Process complete SSE messages
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() ?? "";
+
+      for (const chunk of chunks) {
+        const trimmed = chunk.trim();
+        if (!trimmed) continue;
+
+        for (const line of trimmed.split("\n")) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6);
+            if (data === "[DONE]") {
+              yield { token: "", done: true };
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const token = parsed.choices?.[0]?.delta?.content ?? "";
+              if (token) {
+                yield { token, done: false };
+              }
+            } catch {
+              // Skip malformed JSON
+            }
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  yield { token: "", done: true };
+}
+
+/**
+ * Stream from OpenAI API — yields tokens as they arrive.
+ */
+async function* streamOpenAI(
+  messages: LLMMessage[],
+  options?: {
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    responseFormat?: { type: "json_object" } | { type: "text" };
+  }
+): AsyncGenerator<StreamChunk, void, unknown> {
+  const config = getOpenAIConfig();
+
+  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: options?.model ?? config.model,
+      messages,
+      temperature: options?.temperature ?? 0.7,
+      max_tokens: options?.maxTokens ?? 2000,
+      stream: true,
+      ...(options?.responseFormat && {
+        response_format: options.responseFormat,
+      }),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(
+      `OpenAI streaming error: ${response.status} ${response.statusText} — ${errorBody}`
+    );
+  }
+
+  if (!response.body) {
+    throw new Error("OpenAI response has no body stream");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() ?? "";
+
+      for (const chunk of chunks) {
+        const trimmed = chunk.trim();
+        if (!trimmed) continue;
+
+        for (const line of trimmed.split("\n")) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6);
+            if (data === "[DONE]") {
+              yield { token: "", done: true };
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              const token = parsed.choices?.[0]?.delta?.content ?? "";
+              if (token) {
+                yield { token, done: false };
+              }
+            } catch {
+              // Skip malformed JSON
+            }
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  yield { token: "", done: true };
 }
 
 /**
