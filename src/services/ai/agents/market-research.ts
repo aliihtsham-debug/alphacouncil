@@ -33,8 +33,8 @@ export class MarketResearchAgent extends BaseAgent<
       {
         name: "Market Research",
         systemPrompt: MARKET_RESEARCH_SYSTEM_PROMPT,
-        maxRetries: 2,
-        timeoutMs: 15000,
+        maxRetries: 1,
+        timeoutMs: 30000,
         temperature: 0.5,
       },
       marketResearchOutputSchema

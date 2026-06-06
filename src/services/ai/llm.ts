@@ -10,8 +10,8 @@
 import { getEnv } from "@/lib/env";
 import type { LLMMessage } from "./types";
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_RETRIES = 3;
+const DEFAULT_TIMEOUT_MS = 25_000;
+const MAX_RETRIES = 1;
 
 interface LLMResponse {
   content: string;

@@ -33,8 +33,8 @@ export class BullAnalystAgent extends BaseAgent<
       {
         name: "Bull Analyst",
         systemPrompt: BULL_ANALYST_SYSTEM_PROMPT,
-        maxRetries: 2,
-        timeoutMs: 15000,
+        maxRetries: 1,
+        timeoutMs: 30000,
         temperature: 0.6,
       },
       bullAnalystOutputSchema
