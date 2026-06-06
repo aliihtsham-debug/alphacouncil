@@ -28,7 +28,7 @@ function getCmcConfig() {
 /**
  * Make an authenticated request to CoinMarketCap API.
  */
-async function cmcFetch<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
+export async function cmcFetch<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
   const { apiKey, baseUrl } = getCmcConfig();
 
   // If no API key, throw to trigger mock fallback

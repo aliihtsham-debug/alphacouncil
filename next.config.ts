@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // ─── Experimental ─────────────────────
-  serverExternalPackages: ["@prisma/client"],
+  serverExternalPackages: ["@prisma/client", "pdfkit", "fontkit"],
 
   // ─── Headers ──────────────────────────
   async headers() {

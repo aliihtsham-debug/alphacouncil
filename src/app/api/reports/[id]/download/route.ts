@@ -36,7 +36,7 @@ export async function GET(
 
       const filename = `alpha-council-${report.type.toLowerCase()}-${report.id.slice(0, 8)}.pdf`;
 
-      return new Response(pdfBuffer, {
+      return new Response(pdfBuffer as unknown as BodyInit, {
         headers: {
           "Content-Type": "application/pdf",
           "Content-Disposition": `attachment; filename="${filename}"`,

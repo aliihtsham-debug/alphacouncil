@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { useAgentStore } from "@/stores/agent-store";
 import { useTradeStore } from "@/stores/trade-store";
 import { useWalletStore } from "@/stores/wallet-store";
+import { usePortfolioStore } from "@/stores/portfolio-store";
 import { formatUsd } from "@/lib/utils";
 
 const mockRecommendation = {
@@ -45,8 +46,9 @@ const mockRecommendation = {
 };
 
 export default function RecommendationPage() {
-  const { isConnected } = useWalletStore();
+  const { isConnected, address } = useWalletStore();
   const { finalRecommendation } = useAgentStore();
+  const { data: portfolioData } = usePortfolioStore();
   const { activeTrade, isExecuting, error, executeTrade, rejectTrade, resetTrade, clearError } =
     useTradeStore();
 
@@ -70,7 +72,11 @@ export default function RecommendationPage() {
     const tradeRec = modifiedAllocation !== recommendation.allocation
       ? { ...recommendation, allocation: modifiedAllocation }
       : recommendation;
-    await executeTrade(tradeRec);
+    await executeTrade(
+      tradeRec,
+      address ?? "",
+      portfolioData?.totalValueUsd ?? 0
+    );
   };
 
   const handleReject = () => {

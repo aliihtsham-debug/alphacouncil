@@ -5,12 +5,8 @@
  * This is a view function (no gas cost) that returns real-time prices.
  */
 
-import { PANCAKESWAP_ROUTER, WBNB } from "./calldata";
-import {
-  encodeGetAmountsOut,
-  decodeAmountsOut,
-  ethCallContract,
-} from "./rpc";
+import { PANCAKESWAP_ROUTER, WBNB, encodeGetAmountsOut, decodeAmountsOut } from "./calldata";
+import { ethCallContract } from "./rpc";
 import type { SwapQuote } from "./types";
 
 // Common token addresses on BSC

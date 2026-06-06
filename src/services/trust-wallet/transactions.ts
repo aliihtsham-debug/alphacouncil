@@ -12,9 +12,9 @@ import {
   encodeSwapExactETHForTokens,
   encodeSwapExactTokensForETH,
 } from "./calldata";
-import { getSwapQuote, getTokenAddress, getTokenDecimals } from "./swap-quote";
+import { getSwapQuote as getSwapQuoteFromRouter, getTokenAddress, getTokenDecimals } from "./swap-quote";
 import {
-  getTransactionStatus,
+  getTransactionStatus as getRpcTransactionStatus,
   estimateGas,
   getGasPrice,
   sendTransaction,
@@ -31,7 +31,7 @@ export async function getSwapQuote(params: {
   amount: string;
   chain?: string;
 }): Promise<SwapQuote> {
-  return getSwapQuote(params);
+  return getSwapQuoteFromRouter(params);
 }
 
 // ─── Transaction Signing & Sending ──────────────────────
@@ -197,7 +197,7 @@ export async function executeSwap(params: {
 export async function getTransactionStatus(
   txHash: string
 ): Promise<"pending" | "confirmed" | "failed"> {
-  return getTransactionStatus(txHash);
+  return getRpcTransactionStatus(txHash);
 }
 
 // ─── Helpers ────────────────────────────────────────────

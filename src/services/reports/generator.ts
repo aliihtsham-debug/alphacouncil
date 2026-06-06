@@ -19,6 +19,7 @@ export interface ReportData {
     riskScore: number;
     assets: Array<{
       tokenSymbol: string;
+      tokenName: string;
       allocationPct: number;
       valueUsd: number;
       sector: string;

@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn, formatUsd, formatPercent, formatCompact } from "@/lib/utils";
 import type { CMCToken } from "@/services/coinmarketcap/types";
-import { mockTokens } from "@/services/coinmarketcap/mock-data";
 
 // ─── Category Tabs ───────────────────────────────────────
 
@@ -161,13 +160,12 @@ export default function ScannerPage() {
         if (result.success && result.data) {
           setApiTokens(result.data);
         } else {
-          // Fallback to mock data
-          setApiTokens(mockTokens);
+          setApiTokens([]);
         }
       })
       .catch(() => {
         if (cancelled) return;
-        setApiTokens(mockTokens);
+        setApiTokens([]);
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);

@@ -5,17 +5,18 @@
  * Server-side only — runs in API routes.
  */
 
-import PDFDocument from "pdfkit";
 import type { GeneratedReport, ReportData } from "./generator";
 
 /**
  * Generate a professional PDF report.
  * Returns a Buffer containing the PDF data.
  */
-export function generatePdf(
+export async function generatePdf(
   report: GeneratedReport,
   data?: ReportData
 ): Promise<Buffer> {
+  const PDFDocument = (await import("pdfkit")).default;
+
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const doc = new PDFDocument({

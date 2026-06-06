@@ -6,8 +6,8 @@
  */
 
 import { cmcFetch } from "@/services/coinmarketcap/client";
-import { PANCAKESWAP_ROUTER, WBNB } from "./calldata";
-import { encodeGetAmountsOut, decodeAmountsOut, ethCallContract } from "./rpc";
+import { PANCAKESWAP_ROUTER, WBNB, encodeGetAmountsOut, decodeAmountsOut } from "./calldata";
+import { ethCallContract } from "./rpc";
 
 interface PriceData {
   priceUsd: number;
