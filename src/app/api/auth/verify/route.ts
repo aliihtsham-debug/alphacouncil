@@ -67,10 +67,18 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       console.error("Database error details:", errMsg);
+
+      const isConnectionError =
+        errMsg.toLowerCase().includes("can't reach database") ||
+        errMsg.toLowerCase().includes("environment variable is not set") ||
+        errMsg.toLowerCase().includes("connection");
+
       return NextResponse.json(
         {
           success: false,
-          error: `Database error: ${errMsg}`,
+          error: isConnectionError
+            ? "Database is unavailable. Please try again later or contact support."
+            : "Database error. Please try again.",
         },
         { status: 503 }
       );

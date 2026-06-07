@@ -74,8 +74,9 @@ export async function middleware(request: NextRequest) {
       select: { id: true },
     });
     userId = user?.id;
-  } catch {
-    // DB lookup failed — continue without userId
+  } catch (error) {
+    // DB lookup failed — log for debugging but continue without userId
+    console.error("Middleware DB lookup failed:", error);
   }
 
   // Inject user headers

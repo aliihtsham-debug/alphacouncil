@@ -16,11 +16,18 @@ let adapterInstance: any = null;
 
 async function getAdapter() {
   if (!adapterInstance) {
+    if (!process.env.DATABASE_URL) {
+      throw new Error(
+        "DATABASE_URL environment variable is not set. " +
+        "Please configure it in your .env.local file (development) or deployment environment variables (production)."
+      );
+    }
     const { PrismaPg } = await import("@prisma/adapter-pg");
     const { Pool } = await import("pg");
     const pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 10000,
     });
     adapterInstance = new PrismaPg(pool);
   }
