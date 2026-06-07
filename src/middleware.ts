@@ -11,6 +11,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest, parseSessionCookie } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 // Routes that do NOT require authentication
 const PUBLIC_PREFIXES = ["/api/auth", "/api/market"];
@@ -65,9 +66,24 @@ export async function middleware(request: NextRequest) {
     );
   }
 
+  // Look up user ID from database
+  let userId: string | undefined;
+  try {
+    const user = await prisma.user.findUnique({
+      where: { walletAddress: session.address },
+      select: { id: true },
+    });
+    userId = user?.id;
+  } catch {
+    // DB lookup failed — continue without userId
+  }
+
   // Inject user headers
   const headers = new Headers(request.headers);
   headers.set("x-user-address", session.address);
+  if (userId) {
+    headers.set("x-user-id", userId);
+  }
 
   const response = NextResponse.next({
     request: { headers },

@@ -8,33 +8,12 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { SiweMessage } from "siwe";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
-import { PrismaClient } from "@prisma/client";
 import {
   verifySiweMessage,
   createSessionCookie,
   type SessionData,
 } from "@/lib/auth";
-
-// Prisma client with pg adapter — created lazily on first request
-let prisma: PrismaClient | null = null;
-
-function getPrismaClient(): PrismaClient {
-  if (!prisma) {
-    const dbUrl = process.env.DATABASE_URL;
-    if (!dbUrl) {
-      throw new Error("DATABASE_URL environment variable is not set");
-    }
-    const pool = new Pool({
-      connectionString: dbUrl,
-      ssl: { rejectUnauthorized: false },
-    });
-    const adapter = new PrismaPg(pool);
-    prisma = new PrismaClient({ adapter });
-  }
-  return prisma;
-}
+import { prisma } from "@/lib/prisma";
 
 export async function POST(request: NextRequest) {
   try {
@@ -75,7 +54,7 @@ export async function POST(request: NextRequest) {
     // Find or create user in database
     let user;
     try {
-      const db = getPrismaClient();
+      const db = prisma;
       user = await db.user.findUnique({
         where: { walletAddress: address },
       });

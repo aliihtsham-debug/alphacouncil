@@ -40,6 +40,7 @@ describe("generateReport", () => {
         assets: [
           {
             tokenSymbol: "BNB",
+            tokenName: "BNB",
             allocationPct: 0.6,
             valueUsd: 9000,
             sector: "Layer1",
