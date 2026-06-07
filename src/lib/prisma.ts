@@ -7,11 +7,11 @@
  * See: https://www.prisma.io/docs/guides/performance-and-optimization/connection-management
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import "dotenv/config";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let PrismaClientClass: any = null;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let adapterInstance: any = null;
 
 async function getAdapter() {
@@ -34,11 +34,10 @@ async function getAdapter() {
   return adapterInstance;
 }
 
-function getPrismaClientClass(): unknown {
+async function getPrismaClientClass(): Promise<unknown> {
   if (!PrismaClientClass) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const mod = require("@prisma/client") as Record<string, unknown>;
+      const mod = (await import("@prisma/client")) as Record<string, unknown>;
       PrismaClientClass = mod.PrismaClient ?? (mod as { default?: { PrismaClient: unknown } }).default?.PrismaClient;
       if (!PrismaClientClass) {
         throw new Error("PrismaClient not found in @prisma/client module");
@@ -57,16 +56,16 @@ const globalForPrisma = globalThis as unknown as {
 
 async function getClient(): Promise<unknown> {
   if (!globalForPrisma.prisma) {
-    const ClientClass = getPrismaClientClass();
-    const adapter = await getAdapter();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any, new-cap
+    const [ClientClass, adapter] = await Promise.all([
+      getPrismaClientClass(),
+      getAdapter(),
+    ]);
     globalForPrisma.prisma = new (ClientClass as any)({ adapter });
   }
   return globalForPrisma.prisma;
 }
 
 // Synchronous proxy — first call triggers async init, subsequent calls use cached client
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let initPromise: Promise<unknown> | null = null;
 
 function ensureInit() {
@@ -76,11 +75,9 @@ function ensureInit() {
   return initPromise;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const prisma: any = new Proxy({} as Record<string, unknown>, {
   get(_target, prop) {
     if (prop === "then") return undefined; // Prevent being treated as a Promise
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const client: any = globalForPrisma.prisma;
     if (client) {
       const value = client[prop as string];
@@ -92,7 +89,6 @@ export const prisma: any = new Proxy({} as Record<string, unknown>, {
     // Return a function that awaits init then delegates
     return (...args: unknown[]) => {
       return ensureInit().then((c: unknown) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const fn = (c as any)[prop];
         if (typeof fn === "function") {
           return fn.apply(c, args);

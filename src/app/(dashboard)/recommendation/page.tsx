@@ -24,27 +24,6 @@ import { useWalletStore } from "@/stores/wallet-store";
 import { usePortfolioStore } from "@/stores/portfolio-store";
 import { formatUsd } from "@/lib/utils";
 
-const mockRecommendation = {
-  decision: "BUY" as const,
-  tokenSymbol: "FET",
-  tokenName: "Fetch.ai",
-  allocation: 8,
-  confidence: 87,
-  investmentThesis:
-    "Fetch.ai demonstrates strong momentum in the AI narrative with increasing developer activity and strategic partnerships. The token is well-positioned for growth as AI adoption accelerates in the BNB ecosystem.",
-  supportingArguments: [
-    "Strong AI narrative momentum across the market",
-    "Increasing developer activity on GitHub",
-    "Strategic partnership announcements expected",
-    "Technical breakout above key resistance level",
-  ],
-  risks: [
-    "AI sector rotation could shift focus to competitors",
-    "Broader market correction may impact momentum",
-    "Regulatory uncertainty around AI tokens",
-  ],
-};
-
 export default function RecommendationPage() {
   const { isConnected, address } = useWalletStore();
   const { finalRecommendation } = useAgentStore();
@@ -55,23 +34,23 @@ export default function RecommendationPage() {
   const [showModify, setShowModify] = React.useState(false);
   const [modifiedAllocation, setModifiedAllocation] = React.useState<number>(0);
 
-  const recommendation = finalRecommendation ?? mockRecommendation;
-
-  // Initialize modify input when recommendation changes
+  // Sync modified allocation when recommendation changes
+  const prevRecRef = React.useRef(finalRecommendation);
   React.useEffect(() => {
-    if (finalRecommendation) {
-      setModifiedAllocation(finalRecommendation.allocation);
+    if (finalRecommendation !== prevRecRef.current) {
+      prevRecRef.current = finalRecommendation;
+      if (finalRecommendation) {
+        setModifiedAllocation(finalRecommendation.allocation);
+        setShowModify(false);
+      }
     }
   }, [finalRecommendation]);
 
-  React.useEffect(() => {
-    setModifiedAllocation(recommendation.allocation);
-  }, [recommendation.allocation]);
-
   const handleApprove = async () => {
-    const tradeRec = modifiedAllocation !== recommendation.allocation
-      ? { ...recommendation, allocation: modifiedAllocation }
-      : recommendation;
+    if (!finalRecommendation) return;
+    const tradeRec = modifiedAllocation !== finalRecommendation.allocation
+      ? { ...finalRecommendation, allocation: modifiedAllocation }
+      : finalRecommendation;
     await executeTrade(
       tradeRec,
       address ?? "",
@@ -80,7 +59,8 @@ export default function RecommendationPage() {
   };
 
   const handleReject = () => {
-    rejectTrade(recommendation.tokenSymbol);
+    if (!finalRecommendation) return;
+    rejectTrade(finalRecommendation.tokenSymbol);
   };
 
   const handleReset = () => {
@@ -93,13 +73,28 @@ export default function RecommendationPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
         <AlertTriangle className="h-16 w-16 text-muted-foreground mb-4" />
-        <h2 className="text-2xl font-bold mb-2">No Recommendation Yet</h2>
+        <h2 className="text-2xl font-bold mb-2">Wallet Not Connected</h2>
         <p className="text-muted-foreground">
           Connect your wallet and start a debate to get recommendations
         </p>
       </div>
     );
   }
+
+  if (!finalRecommendation) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+        <AlertTriangle className="h-16 w-16 text-muted-foreground mb-4" />
+        <h2 className="text-2xl font-bold mb-2">No Recommendation Yet</h2>
+        <p className="text-muted-foreground max-w-md">
+          Start a debate on the Committee page to receive an AI-powered investment recommendation.
+          The committee of 5 agents will analyze the market and reach a consensus.
+        </p>
+      </div>
+    );
+  }
+
+  const recommendation = finalRecommendation;
 
   const decisionColor =
     recommendation.decision === "BUY"

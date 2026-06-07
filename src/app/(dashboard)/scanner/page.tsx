@@ -144,7 +144,6 @@ export default function ScannerPage() {
   React.useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
-    setError(null);
 
     const endpoint =
       viewMode === "gainers"

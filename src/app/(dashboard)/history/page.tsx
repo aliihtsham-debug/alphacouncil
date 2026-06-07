@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { Clock, Check, X, ExternalLink, Loader2 } from "lucide-react";
 import { GlassCard } from "@/components/shared/glass-card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+
 import { EmptyState } from "@/components/shared/empty-state";
 import { useTradeStore } from "@/stores/trade-store";
 import { useWalletStore } from "@/stores/wallet-store";

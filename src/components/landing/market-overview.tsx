@@ -49,6 +49,7 @@ export function MarketOverview() {
   const [stats, setStats] = React.useState<MarketStats>(fallbackStats);
   const [tokens, setTokens] = React.useState<Token[]>(fallbackTokens);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [isLive, setIsLive] = React.useState(false);
 
   React.useEffect(() => {
     const fetchMarketData = async () => {
@@ -58,6 +59,7 @@ export function MarketOverview() {
           const data = await response.json();
           if (data.stats) setStats(data.stats);
           if (data.tokens) setTokens(data.tokens);
+          setIsLive(true);
         }
       } catch {
         // Use fallback data
@@ -108,9 +110,17 @@ export function MarketOverview() {
           <h2 className="text-3xl font-bold mb-2">
             Market <span className="text-gradient-cyan">Overview</span>
           </h2>
-          <p className="text-muted-foreground">
-            Real-time crypto market data powering committee decisions
-          </p>
+          <div className="flex items-center justify-center gap-2">
+            <p className="text-muted-foreground">
+              Real-time crypto market data powering committee decisions
+            </p>
+            {isLive && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 border border-green-500/30 px-2 py-0.5 text-[10px] font-medium text-green-400 uppercase tracking-wider">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
+                Live
+              </span>
+            )}
+          </div>
         </motion.div>
 
         {/* Stats Grid */}

@@ -15,7 +15,7 @@ import {
 } from "recharts";
 import { TrendingUp, TrendingDown, DollarSign, Shield, AlertTriangle } from "lucide-react";
 import { GlassCard } from "@/components/shared/glass-card";
-import { AnimatedNumber } from "@/components/shared/animated-number";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";

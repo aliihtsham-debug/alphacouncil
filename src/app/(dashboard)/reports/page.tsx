@@ -73,13 +73,15 @@ export default function ReportsPage() {
       }
 
       const data = await response.json();
+      // eslint-disable-next-line react-hooks/purity
+      const now = Date.now();
 
       const report: Report = {
-        id: `report_${Date.now()}`,
+        id: `report_${now}`,
         type,
         title: reportTypes.find((r) => r.key === type)?.title ?? "Report",
         content: data.content ?? generateFallbackContent(type),
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(now).toISOString(),
       };
 
       setReports((prev) => [report, ...prev]);
@@ -88,12 +90,14 @@ export default function ReportsPage() {
     } catch (error) {
       // Generate report locally as fallback
       const reportType = reportTypes.find((r) => r.key === type);
+      // eslint-disable-next-line react-hooks/purity
+      const fallbackNow = Date.now();
       const report: Report = {
-        id: `report_${Date.now()}`,
+        id: `report_${fallbackNow}`,
         type,
         title: reportType?.title ?? "Report",
         content: generateFallbackContent(type),
-        createdAt: new Date().toISOString(),
+        createdAt: new Date(fallbackNow).toISOString(),
       };
       setReports((prev) => [report, ...prev]);
       setActiveReport(report);

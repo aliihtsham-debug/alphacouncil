@@ -45,6 +45,93 @@ export function useDebate() {
   const { showToast } = useUIStore();
 
   /**
+   * Persist recommendation to the API.
+   */
+  const persistRecommendation = React.useCallback(
+    async (recommendation: FinalRecommendation) => {
+      try {
+        await fetch("/api/recommendation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: useAgentStore.getState().sessionId,
+            decision: recommendation.decision,
+            tokenSymbol: recommendation.tokenSymbol,
+            tokenName: recommendation.tokenName,
+            allocation: recommendation.allocation,
+            confidence: recommendation.confidence,
+            investmentThesis: recommendation.investmentThesis,
+            supportingArguments: recommendation.supportingArguments,
+            risks: recommendation.risks,
+          }),
+        });
+      } catch (error) {
+        console.error("Failed to persist recommendation:", error);
+      }
+    },
+    []
+  );
+
+  /**
+   * Handle an SSE event by dispatching to the agent store.
+   */
+  const handleEvent = React.useCallback(
+    (event: DebateEvent) => {
+      switch (event.type) {
+        case "session_start":
+          // Session already started in startDebate
+          break;
+
+        case "agent_start":
+          setAgentThinking(event.agent);
+          break;
+
+        case "agent_token":
+          setAgentStreaming(event.agent);
+          break;
+
+        case "agent_end":
+          setAgentOutput(event.agent, event.output as never, event.latencyMs);
+          break;
+
+        case "agent_error":
+          setAgentError(event.agent, event.error);
+          break;
+
+        case "final":
+          setFinalRecommendation(event.recommendation);
+          // Persist recommendation to API
+          persistRecommendation(event.recommendation);
+          break;
+
+        case "done":
+          endSession();
+          break;
+
+        case "error":
+          setSessionError(event.message);
+          showToast(event.message, "error");
+          break;
+      }
+    },
+    [
+      setAgentThinking,
+      setAgentStreaming,
+      setAgentOutput,
+      setAgentError,
+      setFinalRecommendation,
+      setSessionError,
+      endSession,
+      showToast,
+      persistRecommendation,
+    ]
+  );
+
+  // Keep a ref so startDebate always calls the latest handler
+  const handleEventRef = React.useRef(handleEvent);
+  handleEventRef.current = handleEvent;
+
+  /**
    * Start a debate by connecting to the SSE stream.
    */
   const startDebate = React.useCallback(
@@ -109,7 +196,7 @@ export function useDebate() {
             if (dataLine) {
               try {
                 const event: DebateEvent = JSON.parse(dataLine.slice(6));
-                handleEvent(event);
+                handleEventRef.current(event);
               } catch (parseError) {
                 console.warn("Failed to parse SSE event:", trimmed, parseError);
               }
@@ -134,95 +221,10 @@ export function useDebate() {
     [
       portfolioData,
       startSession,
-      setAgentThinking,
-      setAgentStreaming,
-      setAgentOutput,
-      setAgentError,
-      setFinalRecommendation,
       setSessionError,
-      endSession,
       showToast,
     ]
   );
-
-  /**
-   * Handle an SSE event by dispatching to the agent store.
-   */
-  const handleEvent = React.useCallback(
-    (event: DebateEvent) => {
-      switch (event.type) {
-        case "session_start":
-          // Session already started in startDebate
-          break;
-
-        case "agent_start":
-          setAgentThinking(event.agent);
-          break;
-
-        case "agent_token":
-          setAgentStreaming(event.agent);
-          break;
-
-        case "agent_end":
-          setAgentOutput(event.agent, event.output as never, event.latencyMs);
-          break;
-
-        case "agent_error":
-          setAgentError(event.agent, event.error);
-          break;
-
-        case "final":
-          setFinalRecommendation(event.recommendation);
-          // Persist recommendation to API
-          persistRecommendation(event.recommendation);
-          break;
-
-        case "done":
-          endSession();
-          break;
-
-        case "error":
-          setSessionError(event.message);
-          showToast(event.message, "error");
-          break;
-      }
-    },
-    [
-      setAgentThinking,
-      setAgentStreaming,
-      setAgentOutput,
-      setAgentError,
-      setFinalRecommendation,
-      setSessionError,
-      endSession,
-      showToast,
-    ]
-  );
-
-  /**
-   * Persist recommendation to the API.
-   */
-  const persistRecommendation = async (recommendation: FinalRecommendation) => {
-    try {
-      await fetch("/api/recommendation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: useAgentStore.getState().sessionId,
-          decision: recommendation.decision,
-          tokenSymbol: recommendation.tokenSymbol,
-          tokenName: recommendation.tokenName,
-          allocation: recommendation.allocation,
-          confidence: recommendation.confidence,
-          investmentThesis: recommendation.investmentThesis,
-          supportingArguments: recommendation.supportingArguments,
-          risks: recommendation.risks,
-        }),
-      });
-    } catch (error) {
-      console.error("Failed to persist recommendation:", error);
-    }
-  };
 
   /**
    * Stop the current debate (for Reset button).
