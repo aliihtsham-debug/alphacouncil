@@ -8,12 +8,19 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { SiweMessage } from "siwe";
-import { prisma } from "@/lib/prisma";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
+import { PrismaClient } from "@prisma/client";
 import {
   verifySiweMessage,
   createSessionCookie,
   type SessionData,
 } from "@/lib/auth";
+
+// Direct Prisma client with pg adapter for serverless compatibility
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 export async function POST(request: NextRequest) {
   try {
@@ -42,28 +49,57 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse the SIWE message to get chainId
-    const siweMsg = new SiweMessage(message);
-    const chainId = siweMsg.chainId ?? 56;
+    let chainId = 56;
+    try {
+      const siweMsg = new SiweMessage(message);
+      chainId = siweMsg.chainId ?? 56;
+    } catch (error) {
+      console.error("SIWE parse error:", error);
+      // Continue with default chainId
+    }
 
     // Find or create user in database
-    let user = await prisma.user.findUnique({
-      where: { walletAddress: address },
-    });
-
-    if (!user) {
-      user = await prisma.user.create({
-        data: { walletAddress: address },
+    let user;
+    try {
+      user = await prisma.user.findUnique({
+        where: { walletAddress: address },
       });
+
+      if (!user) {
+        user = await prisma.user.create({
+          data: { walletAddress: address },
+        });
+      }
+    } catch (error) {
+      console.error("Database error:", error);
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Database error. Please try again.",
+        },
+        { status: 503 }
+      );
     }
 
     // Create session
-    const sessionData: SessionData = {
-      address,
-      chainId,
-      issuedAt: Date.now(),
-    };
-
-    const cookieValue = await createSessionCookie(sessionData);
+    let cookieValue: string;
+    try {
+      const sessionData: SessionData = {
+        address,
+        chainId,
+        issuedAt: Date.now(),
+      };
+      cookieValue = await createSessionCookie(sessionData);
+    } catch (error) {
+      console.error("Session creation error:", error);
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Session creation failed. Please try again.",
+        },
+        { status: 500 }
+      );
+    }
 
     const response = NextResponse.json({
       success: true,
@@ -83,11 +119,11 @@ export async function POST(request: NextRequest) {
 
     return response;
   } catch (error) {
-    console.error("Auth verify error:", error);
+    console.error("Auth verify unexpected error:", error);
     return NextResponse.json(
       {
         success: false,
-        error: "Authentication failed",
+        error: error instanceof Error ? error.message : "Authentication failed",
       },
       { status: 500 }
     );
