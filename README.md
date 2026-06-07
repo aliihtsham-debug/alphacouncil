@@ -266,7 +266,7 @@ cp .env.example .env.local
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/alphacouncil.git
+git clone https://github.com/aliihtsham-debug/alphacouncil.git
 cd alphacouncil
 
 # Install dependencies (triggers prisma generate via postinstall)
