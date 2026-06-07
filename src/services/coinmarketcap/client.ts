@@ -5,7 +5,6 @@
  * Responses are cached via the cache layer.
  */
 
-import { getEnv } from "@/lib/env";
 import type {
   CMCListingsResponse,
   CMCTrendingResponse,
@@ -16,12 +15,12 @@ import type {
 
 /**
  * Get CMC config at call time (not module load time).
+ * Reads env vars directly to avoid failing on unrelated missing vars.
  */
 function getCmcConfig() {
-  const env = getEnv();
   return {
-    apiKey: env.COINMARKETCAP_API_KEY,
-    baseUrl: env.COINMARKETCAP_BASE_URL,
+    apiKey: process.env.COINMARKETCAP_API_KEY ?? "",
+    baseUrl: process.env.COINMARKETCAP_BASE_URL ?? "https://pro-api.coinmarketcap.com/v1",
   };
 }
 
