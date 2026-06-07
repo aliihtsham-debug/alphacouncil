@@ -55,9 +55,9 @@ export async function POST(request: NextRequest) {
               prompt,
               portfolio,
               marketData: {
-                fearGreedIndex: marketOverview.fearGreedIndex,
-                btcDominance: marketOverview.btcDominance,
-                trendingTokens: marketOverview.topTokens.map((t) => t.symbol),
+                fearGreedIndex: marketOverview?.fearGreedIndex ?? 50,
+                btcDominance: marketOverview?.btcDominance ?? 0,
+                trendingTokens: marketOverview?.topTokens?.map((t) => t.symbol) ?? [],
               },
             },
             (event) => sendEvent(event as Record<string, unknown>)
