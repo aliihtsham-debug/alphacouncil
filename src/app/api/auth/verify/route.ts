@@ -17,10 +17,21 @@ import {
   type SessionData,
 } from "@/lib/auth";
 
-// Direct Prisma client with pg adapter for serverless compatibility
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+// Prisma client with pg adapter — created lazily on first request
+let prisma: PrismaClient | null = null;
+
+function getPrismaClient(): PrismaClient {
+  if (!prisma) {
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl) {
+      throw new Error("DATABASE_URL environment variable is not set");
+    }
+    const pool = new Pool({ connectionString: dbUrl });
+    const adapter = new PrismaPg(pool);
+    prisma = new PrismaClient({ adapter });
+  }
+  return prisma;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -61,21 +72,23 @@ export async function POST(request: NextRequest) {
     // Find or create user in database
     let user;
     try {
-      user = await prisma.user.findUnique({
+      const db = getPrismaClient();
+      user = await db.user.findUnique({
         where: { walletAddress: address },
       });
 
       if (!user) {
-        user = await prisma.user.create({
+        user = await db.user.create({
           data: { walletAddress: address },
         });
       }
     } catch (error) {
-      console.error("Database error:", error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error("Database error details:", errMsg);
       return NextResponse.json(
         {
           success: false,
-          error: "Database error. Please try again.",
+          error: `Database error: ${errMsg}`,
         },
         { status: 503 }
       );
