@@ -11,10 +11,6 @@ const envSchema = z.object({
   // ─── Database ────────────────────────
   DATABASE_URL: z.string().optional(),
 
-  // ─── Redis ───────────────────────────
-  REDIS_URL: z.string().optional(),
-  REDIS_TOKEN: z.string().optional(),
-
   // ─── AI ──────────────────────────────
   OPENROUTER_API_KEY: z.string().min(1),
   OPENROUTER_BASE_URL: z
