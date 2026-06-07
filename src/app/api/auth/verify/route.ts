@@ -26,7 +26,10 @@ function getPrismaClient(): PrismaClient {
     if (!dbUrl) {
       throw new Error("DATABASE_URL environment variable is not set");
     }
-    const pool = new Pool({ connectionString: dbUrl });
+    const pool = new Pool({
+      connectionString: dbUrl,
+      ssl: { rejectUnauthorized: false },
+    });
     const adapter = new PrismaPg(pool);
     prisma = new PrismaClient({ adapter });
   }

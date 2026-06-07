@@ -18,7 +18,10 @@ async function getAdapter() {
   if (!adapterInstance) {
     const { PrismaPg } = await import("@prisma/adapter-pg");
     const { Pool } = await import("pg");
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    const pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+    });
     adapterInstance = new PrismaPg(pool);
   }
   return adapterInstance;
