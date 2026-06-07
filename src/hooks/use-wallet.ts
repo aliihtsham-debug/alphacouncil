@@ -4,6 +4,7 @@ import * as React from "react";
 import { useWalletStore } from "@/stores/wallet-store";
 import { usePortfolioStore } from "@/stores/portfolio-store";
 import { analyzePortfolio } from "@/services/portfolio/analyzer";
+import { createSiweMessage } from "@/lib/auth";
 import type { WalletConnectionState } from "@/services/trust-wallet";
 
 export function useWallet() {
@@ -29,14 +30,23 @@ export function useWallet() {
 
       if (!ethereum) {
         throw new Error(
-          "Trust Wallet not detected. Please install Trust Wallet browser extension."
+          "No wallet detected. Please install Trust Wallet or MetaMask browser extension."
         );
       }
 
       // Request account access
-      const accounts = (await ethereum.request({
-        method: "eth_requestAccounts",
-      })) as string[];
+      let accounts: string[];
+      try {
+        accounts = (await ethereum.request({
+          method: "eth_requestAccounts",
+        })) as string[];
+      } catch (err) {
+        const code = (err as { code?: number })?.code;
+        if (code === 4001 || code === -32003) {
+          throw new Error("Connection rejected. Please approve the connection request in your wallet.");
+        }
+        throw new Error("Failed to request wallet accounts. Please unlock your wallet and try again.");
+      }
 
       if (!accounts || accounts.length === 0) {
         throw new Error("No accounts found. Please unlock your wallet.");
@@ -45,19 +55,27 @@ export function useWallet() {
       const walletAddress = accounts[0];
 
       // Get chain ID
-      const chainIdHex = (await ethereum.request({
-        method: "eth_chainId",
-      })) as string;
+      let chainIdHex: string;
+      try {
+        chainIdHex = (await ethereum.request({
+          method: "eth_chainId",
+        })) as string;
+      } catch {
+        chainIdHex = "0x38"; // Default to BSC mainnet
+      }
       const chainId = parseInt(chainIdHex, 16);
 
       // SIWE: Get nonce from server
       const nonceRes = await fetch("/api/auth/nonce");
+      if (!nonceRes.ok) {
+        throw new Error("Authentication server error. Please try again.");
+      }
       const nonceData = await nonceRes.json();
       if (!nonceData.success) {
         throw new Error("Failed to get authentication nonce");
       }
 
-      // Build SIWE message
+      // Build SIWE message using the auth library (ensures correct EIP-4361 format)
       const domain =
         typeof window !== "undefined" ? window.location.host : "localhost:3000";
       const uri =
@@ -65,22 +83,29 @@ export function useWallet() {
           ? window.location.origin
           : "http://localhost:3000";
 
-      const message = `${domain} wants you to sign in with your Ethereum account:
-${walletAddress}
-
-Sign in to Alpha Council
-
-URI: ${uri}
-Version: 1
-Chain ID: ${chainId}
-Nonce: ${nonceData.nonce}
-Issued At: ${new Date().toISOString()}`;
+      const siweMsg = createSiweMessage({
+        address: walletAddress,
+        chainId,
+        nonce: nonceData.nonce,
+        domain,
+        uri,
+      });
+      const message = siweMsg.prepareMessage();
 
       // Sign the message with Trust Wallet
-      const signature = (await ethereum.request({
-        method: "personal_sign",
-        params: [message, walletAddress],
-      })) as string;
+      let signature: string;
+      try {
+        signature = (await ethereum.request({
+          method: "personal_sign",
+          params: [message, walletAddress],
+        })) as string;
+      } catch (err) {
+        const code = (err as { code?: number })?.code;
+        if (code === 4001) {
+          throw new Error("Signature rejected. Please sign the message in your wallet to continue.");
+        }
+        throw new Error("Failed to sign message. Please try again.");
+      }
 
       // Verify signature with server
       const verifyRes = await fetch("/api/auth/verify", {
@@ -88,6 +113,11 @@ Issued At: ${new Date().toISOString()}`;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, signature }),
       });
+
+      if (!verifyRes.ok) {
+        const errorText = await verifyRes.text();
+        throw new Error(`Server verification failed (${verifyRes.status}): ${errorText}`);
+      }
 
       const verifyData = await verifyRes.json();
       if (!verifyData.success) {

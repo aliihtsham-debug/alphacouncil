@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { SiweMessage } from "siwe";
 import { prisma } from "@/lib/prisma";
 import {
   verifySiweMessage,
@@ -41,8 +42,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse the SIWE message to get chainId
-    const siweMessage = JSON.parse(message);
-    const chainId = siweMessage.chainId ?? 56;
+    const siweMsg = new SiweMessage(message);
+    const chainId = siweMsg.chainId ?? 56;
 
     // Find or create user in database
     let user = await prisma.user.findUnique({

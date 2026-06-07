@@ -17,7 +17,9 @@ export function Header() {
     try {
       await connect();
     } catch (error) {
-      showToast("Failed to connect wallet", "error");
+      const message =
+        error instanceof Error ? error.message : "Failed to connect wallet";
+      showToast(message, "error");
     }
   };
 
