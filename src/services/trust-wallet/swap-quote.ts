@@ -3,14 +3,31 @@
  *
  * Gets on-chain swap quotes from PancakeSwap Router V2 using getAmountsOut().
  * This is a view function (no gas cost) that returns real-time prices.
+ *
+ * Features:
+ * - Multi-hop routing: tries direct pair, then via WBNB/USDT/ETH
+ * - Real price impact calculation
+ * - Slippage tolerance validation with warnings
  */
 
-import { PANCAKESWAP_ROUTER, WBNB, encodeGetAmountsOut, decodeAmountsOut } from "./calldata";
+import {
+  PANCAKESWAP_ROUTER,
+  WBNB,
+  encodeGetAmountsOut,
+  decodeAmountsOut,
+} from "./calldata";
 import { ethCallContract } from "./rpc";
 import type { SwapQuote } from "./types";
 
+// ─── Token Registry ──────────────────────────────────────
+
+interface TokenInfo {
+  address: string;
+  decimals: number;
+}
+
 // Common token addresses on BSC
-const KNOWN_TOKENS: Record<string, { address: string; decimals: number }> = {
+const KNOWN_TOKENS: Record<string, TokenInfo> = {
   BNB: { address: WBNB, decimals: 18 },
   WBNB: { address: WBNB, decimals: 18 },
   USDT: {
@@ -83,6 +100,11 @@ const KNOWN_TOKENS: Record<string, { address: string; decimals: number }> = {
   },
 };
 
+// Intermediate tokens to try for multi-hop routing (in priority order)
+const INTERMEDIATE_TOKENS: string[] = [WBNB, KNOWN_TOKENS.USDT.address, KNOWN_TOKENS.ETH.address, KNOWN_TOKENS.BUSD.address];
+
+// ─── Token Lookup Helpers ────────────────────────────────
+
 /**
  * Get the contract address for a token symbol.
  */
@@ -99,26 +121,258 @@ export function getTokenDecimals(symbol: string): number {
   return KNOWN_TOKENS[upper]?.decimals ?? 18;
 }
 
+// ─── Slippage Validation ─────────────────────────────────
+
+const MIN_SLIPPAGE = 0.1; // 0.1% minimum
+const MAX_SLIPPAGE = 50; // 50% maximum
+const HIGH_SLIPPAGE_THRESHOLD = 2; // Warn above 2%
+const HIGH_PRICE_IMPACT_THRESHOLD = 5; // Warn above 5%
+
+/**
+ * Validate and clamp slippage tolerance.
+ * Returns the clamped value and a warning if the input was out of range.
+ */
+function validateSlippage(slippage: number): {
+  value: number;
+  warning?: string;
+} {
+  if (slippage < MIN_SLIPPAGE) {
+    return {
+      value: MIN_SLIPPAGE,
+      warning: `Slippage tolerance too low (${slippage}%). Clamped to ${MIN_SLIPPAGE}%.`,
+    };
+  }
+  if (slippage > MAX_SLIPPAGE) {
+    return {
+      value: MAX_SLIPPAGE,
+      warning: `Slippage tolerance too high (${slippage}%). Clamped to ${MAX_SLIPPAGE}%.`,
+    };
+  }
+  if (slippage > HIGH_SLIPPAGE_THRESHOLD) {
+    return {
+      value: slippage,
+      warning: `High slippage tolerance (${slippage}%). You may receive significantly less than expected.`,
+    };
+  }
+  return { value: slippage };
+}
+
+// ─── Route Finding ───────────────────────────────────────
+
+interface RouteOption {
+  path: string[];
+  expectedOutput: bigint;
+  priceImpact: number;
+  hopCount: number;
+}
+
+/**
+ * Build candidate paths for a token pair.
+ * For BNB pairs, uses direct path.
+ * For token pairs, tries direct + multiple intermediaries.
+ */
+function buildCandidatePaths(
+  fromAddress: string,
+  toAddress: string
+): string[][] {
+  const isFromBNB = fromAddress === WBNB;
+  const isToBNB = toAddress === WBNB;
+
+  // BNB → Token or Token → BNB: direct path only
+  if (isFromBNB || isToBNB) {
+    return [[fromAddress, toAddress]];
+  }
+
+  // Token → Token: try direct + via each intermediary
+  const paths: string[][] = [];
+
+  // 1. Direct pair
+  paths.push([fromAddress, toAddress]);
+
+  // 2. Via each intermediate token
+  for (const intermediate of INTERMEDIATE_TOKENS) {
+    // Skip if intermediate is same as from or to
+    if (
+      intermediate === fromAddress ||
+      intermediate === toAddress
+    ) {
+      continue;
+    }
+    paths.push([fromAddress, intermediate, toAddress]);
+  }
+
+  return paths;
+}
+
+/**
+ * Query a single route via getAmountsOut.
+ * Returns null if the route has no liquidity.
+ */
+async function queryRoute(
+  path: string[],
+  amountIn: string,
+  fromDecimals: number
+): Promise<RouteOption | null> {
+  try {
+    const calldata = encodeGetAmountsOut({
+      amountIn,
+      path,
+      tokenDecimals: fromDecimals,
+    });
+
+    const result = await ethCallContract(PANCAKESWAP_ROUTER, calldata);
+    const amounts = decodeAmountsOut(result);
+
+    if (amounts.length < path.length) {
+      return null;
+    }
+
+    const expectedOutput = amounts[amounts.length - 1];
+
+    // Zero output means no liquidity
+    if (expectedOutput === BigInt(0)) {
+      return null;
+    }
+
+    return {
+      path,
+      expectedOutput,
+      priceImpact: 0, // Will be calculated after selection
+      hopCount: path.length - 1,
+    };
+  } catch {
+    // Route failed — no liquidity or invalid pair
+    return null;
+  }
+}
+
+/**
+ * Calculate price impact by comparing output for amount vs 1% of amount.
+ * A larger swap relative to pool depth will show higher impact.
+ */
+async function calculatePriceImpact(
+  path: string[],
+  amountIn: string,
+  fromDecimals: number,
+  actualOutput: bigint,
+  toDecimals: number
+): Promise<number> {
+  try {
+    // Query with 1% of the input amount
+    const smallAmount = (parseAmount(amountIn, fromDecimals) / BigInt(100)).toString();
+    if (BigInt(smallAmount) === BigInt(0)) return 0;
+
+    const calldata = encodeGetAmountsOut({
+      amountIn: smallAmount,
+      path,
+      tokenDecimals: fromDecimals,
+    });
+
+    const result = await ethCallContract(PANCAKESWAP_ROUTER, calldata);
+    const amounts = decodeAmountsOut(result);
+
+    if (amounts.length < path.length) return 0;
+
+    const smallOutput = amounts[amounts.length - 1];
+    if (smallOutput === BigInt(0)) return 0;
+
+    // Scale the small output up by 100x to compare with actual output
+    const scaledSmallOutput = smallOutput * BigInt(100);
+
+    // Price impact = 1 - (actualOutput / scaledSmallOutput)
+    // If actual < scaled, there's slippage from pool depth
+    if (scaledSmallOutput === BigInt(0)) return 0;
+
+    const impactBps =
+      Number((scaledSmallOutput - actualOutput) * BigInt(10000) / scaledSmallOutput) / 100;
+
+    return Math.max(0, impactBps);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Find the best route among all candidates.
+ * Selects the route with the highest output amount.
+ * Breaks ties by preferring fewer hops.
+ */
+async function findBestRoute(
+  fromAddress: string,
+  toAddress: string,
+  amountIn: string,
+  fromDecimals: number,
+  toDecimals: number
+): Promise<RouteOption> {
+  const candidatePaths = buildCandidatePaths(fromAddress, toAddress);
+
+  // Query all routes in parallel
+  const results = await Promise.allSettled(
+    candidatePaths.map((path) => queryRoute(path, amountIn, fromDecimals))
+  );
+
+  const validRoutes: RouteOption[] = [];
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value !== null) {
+      validRoutes.push(result.value);
+    }
+  }
+
+  if (validRoutes.length === 0) {
+    throw new Error(
+      `No liquidity found for this token pair. The tokens may not have a trading pair on PancakeSwap.`
+    );
+  }
+
+  // Sort by output (descending), then by hop count (ascending) as tiebreaker
+  validRoutes.sort((a, b) => {
+    if (a.expectedOutput !== b.expectedOutput) {
+      return a.expectedOutput > b.expectedOutput ? -1 : 1;
+    }
+    return a.hopCount - b.hopCount;
+  });
+
+  const bestRoute = validRoutes[0];
+
+  // Calculate actual price impact for the best route
+  bestRoute.priceImpact = await calculatePriceImpact(
+    bestRoute.path,
+    amountIn,
+    fromDecimals,
+    bestRoute.expectedOutput,
+    toDecimals
+  );
+
+  return bestRoute;
+}
+
+// ─── Public API ──────────────────────────────────────────
+
 /**
  * Get a real on-chain swap quote from PancakeSwap.
  *
  * Uses getAmountsOut() which is a view function (no gas cost).
- * Routes through WBNB if no direct pair exists.
+ * Tries multiple routes (direct, via WBNB, USDT, ETH, BUSD) and
+ * selects the one with the best output.
  */
 export async function getSwapQuote(params: {
   fromToken: string;
   toToken: string;
   amount: string;
+  slippage?: number;
   chain?: string;
 }): Promise<SwapQuote> {
   const fromSymbol = params.fromToken.toUpperCase();
   const toSymbol = params.toToken.toUpperCase();
 
-  // Get token addresses
-  let fromAddress = getTokenAddress(fromSymbol);
-  let toAddress = getTokenAddress(toSymbol);
+  // Validate slippage
+  const slippageValidation = validateSlippage(params.slippage ?? 0.5);
+  const slippageTolerance = slippageValidation.value;
 
-  // If we don't know the token, we can't quote
+  // Get token addresses
+  const fromAddress = getTokenAddress(fromSymbol);
+  const toAddress = getTokenAddress(toSymbol);
+
   if (!fromAddress || !toAddress) {
     throw new Error(
       `Unknown token: ${!fromAddress ? fromSymbol : toSymbol}. Token address must be known for on-chain quoting.`
@@ -128,57 +382,72 @@ export async function getSwapQuote(params: {
   const fromDecimals = getTokenDecimals(fromSymbol);
   const toDecimals = getTokenDecimals(toSymbol);
 
-  // Build path: try direct, fallback to via WBNB
-  let path: string[];
-  if (fromAddress === WBNB || toAddress === WBNB) {
-    path = [fromAddress, toAddress];
-  } else {
-    // Route through WBNB for most pairs
-    path = [fromAddress, WBNB, toAddress];
+  // Find the best route
+  const bestRoute = await findBestRoute(
+    fromAddress,
+    toAddress,
+    params.amount,
+    fromDecimals,
+    toDecimals
+  );
+
+  // Calculate minimum received with slippage tolerance
+  const slippageMultiplier = BigInt(
+    Math.floor((100 - slippageTolerance) * 100)
+  );
+  const minimumReceivedRaw =
+    (bestRoute.expectedOutput * slippageMultiplier) / BigInt(10000);
+
+  // Build warnings
+  const warnings: string[] = [];
+  if (slippageValidation.warning) {
+    warnings.push(slippageValidation.warning);
+  }
+  if (bestRoute.priceImpact > HIGH_PRICE_IMPACT_THRESHOLD) {
+    warnings.push(
+      `High price impact (${bestRoute.priceImpact.toFixed(2)}%). This trade will significantly move the market price.`
+    );
+  }
+  if (bestRoute.hopCount > 1) {
+    warnings.push(
+      `Multi-hop route (${bestRoute.hopCount} hops). Higher gas cost and more slippage risk.`
+    );
   }
 
-  // Encode the call
-  const calldata = encodeGetAmountsOut({
-    amountIn: params.amount,
-    path,
-    tokenDecimals: fromDecimals,
-  });
-
-  // Make the eth_call
-  const result = await ethCallContract(PANCAKESWAP_ROUTER, calldata);
-
-  // Decode the result
-  const amounts = decodeAmountsOut(result);
-
-  if (amounts.length < 2) {
-    throw new Error("Invalid quote response from PancakeSwap");
-  }
-
-  const fromAmount = amounts[0];
-  const toAmount = amounts[amounts.length - 1];
-
-  // Calculate price impact (simplified)
-  // For a more accurate calculation, we'd compare against a reference price
-  const priceImpact = 0.1; // Default low impact for now
-
-  // Estimate gas (typical BSC swap: 150k-250k)
-  const estimatedGas = "200000";
+  // Estimate gas based on hop count
+  const baseGas = 150000;
+  const gasPerHop = 50000;
+  const estimatedGas = String(baseGas + (bestRoute.hopCount - 1) * gasPerHop);
 
   return {
     fromToken: fromSymbol,
     toToken: toSymbol,
     fromAmount: params.amount,
-    toAmount: formatAmount(toAmount, toDecimals),
+    toAmount: formatAmount(bestRoute.expectedOutput, toDecimals),
     estimatedGas,
-    priceImpact,
-    route: path.map((addr) => {
+    priceImpact: bestRoute.priceImpact,
+    route: bestRoute.path.map((addr) => {
       // Convert address back to symbol for display
       for (const [sym, info] of Object.entries(KNOWN_TOKENS)) {
         if (info.address.toLowerCase() === addr.toLowerCase()) return sym;
       }
       return addr.slice(0, 6) + "..." + addr.slice(-4);
     }),
+    slippageTolerance,
+    minimumReceived: formatAmount(minimumReceivedRaw, toDecimals),
+    warning: warnings.length > 0 ? warnings.join(" ") : undefined,
   };
+}
+
+// ─── Helpers ─────────────────────────────────────────────
+
+/**
+ * Parse a human-readable amount string to a bigint with decimals.
+ */
+function parseAmount(amount: string, decimals: number): bigint {
+  const [intPart, fracPart = ""] = amount.split(".");
+  const paddedFrac = fracPart.padEnd(decimals, "0").slice(0, decimals);
+  return BigInt(intPart + paddedFrac);
 }
 
 /**

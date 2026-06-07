@@ -70,6 +70,9 @@ export interface SwapQuote {
   estimatedGas: string;
   priceImpact: number;
   route: string[];
+  slippageTolerance: number;
+  minimumReceived: string;
+  warning?: string;
 }
 
 export interface SignedTransaction {

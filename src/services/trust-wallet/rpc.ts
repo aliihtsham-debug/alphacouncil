@@ -6,6 +6,7 @@
  */
 
 import type { TransactionRequest, SignedTransaction } from "./types";
+import { encodeAllowance, encodeSymbol, decodeSymbol } from "./calldata";
 
 const BSC_RPC_URL = "https://bsc-dataseed.binance.org";
 
@@ -149,6 +150,34 @@ export async function sendTransaction(
     rawTransaction: JSON.stringify(txParams),
     txHash,
   };
+}
+
+/**
+ * Query the ERC-20 allowance for a token.
+ * Returns the amount the spender is allowed to transfer from the owner.
+ */
+export async function getAllowance(
+  tokenAddress: string,
+  owner: string,
+  spender: string
+): Promise<bigint> {
+  const calldata = encodeAllowance({ owner, spender });
+  const result = await ethCallContract(tokenAddress, calldata);
+  const clean = result.replace(/^0x/, "");
+  if (clean.length === 0) return BigInt(0);
+  return BigInt("0x" + clean.slice(0, 64));
+}
+
+/**
+ * Query the ERC-20 symbol for a token.
+ * Returns the token symbol string (e.g., "USDT", "FET").
+ */
+export async function getTokenSymbol(
+  tokenAddress: string
+): Promise<string> {
+  const calldata = encodeSymbol();
+  const result = await ethCallContract(tokenAddress, calldata);
+  return decodeSymbol(result);
 }
 
 /**

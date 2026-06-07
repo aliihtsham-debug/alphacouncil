@@ -11,7 +11,9 @@ export interface Trade {
   amount: number;
   amountUsd: number;
   txHash: string | null;
-  status: "PENDING" | "SUBMITTED" | "CONFIRMED" | "FAILED";
+  approvalTxHash: string | null;
+  status: "PENDING" | "APPROVING" | "APPROVED" | "SUBMITTED" | "CONFIRMED" | "FAILED";
+  warning: string | null;
   createdAt: string;
 }
 
@@ -19,12 +21,14 @@ interface TradeStore {
   trades: Trade[];
   activeTrade: Trade | null;
   isExecuting: boolean;
+  swapPhase: "idle" | "approving" | "swapping" | "confirming";
   error: string | null;
 
   executeTrade: (
     recommendation: FinalRecommendation,
     walletAddress: string,
-    portfolioValueUsd: number
+    portfolioValueUsd: number,
+    slippage?: number
   ) => Promise<void>;
   rejectTrade: (recommendationId: string) => void;
   resetTrade: () => void;
@@ -35,14 +39,16 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
   trades: [],
   activeTrade: null,
   isExecuting: false,
+  swapPhase: "idle",
   error: null,
 
   executeTrade: async (
     recommendation: FinalRecommendation,
     walletAddress: string,
-    portfolioValueUsd: number
+    portfolioValueUsd: number,
+    slippage?: number
   ) => {
-    set({ isExecuting: true, error: null });
+    set({ isExecuting: true, error: null, swapPhase: "swapping" });
 
     const tradeId = `trade_${Date.now()}`;
 
@@ -51,8 +57,13 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
       const allocationValue =
         (recommendation.allocation / 100) * portfolioValueUsd;
 
+      // Clamp slippage to valid range
+      const effectiveSlippage = Math.min(50, Math.max(0.1, slippage ?? 0.5));
+
       // For BUY orders, execute a real swap via Trust Wallet
       let txHash: string | null = null;
+      let approvalTxHash: string | null = null;
+      let swapWarning: string | null = null;
       let amount = 0;
 
       if (recommendation.decision === "BUY") {
@@ -69,12 +80,19 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
           fromToken,
           toToken,
           amount: swapAmount,
-          slippage: 0.5,
+          slippage: effectiveSlippage,
           walletAddress,
         });
 
         txHash = swapResult.txHash;
+        approvalTxHash = swapResult.approvalTxHash ?? null;
+        swapWarning = swapResult.warning ?? null;
         amount = parseFloat(swapResult.toAmount);
+
+        // Update phase if an approval was executed
+        if (swapResult.approvalTxHash) {
+          set({ swapPhase: "approving" });
+        }
       } else if (recommendation.decision === "SELL") {
         // For SELL, swap the token back to USDT
         const fromToken = recommendation.tokenSymbol;
@@ -84,15 +102,19 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
         // In production, this should check actual holdings
         const sellAmount = (allocationValue / 100).toFixed(6); // Rough estimate
 
+        set({ swapPhase: "approving" }); // SELL always needs approval
+
         const swapResult = await executeSwap({
           fromToken,
           toToken,
           amount: sellAmount,
-          slippage: 0.5,
+          slippage: effectiveSlippage,
           walletAddress,
         });
 
         txHash = swapResult.txHash;
+        approvalTxHash = swapResult.approvalTxHash ?? null;
+        swapWarning = swapResult.warning ?? null;
         amount = parseFloat(swapResult.fromAmount);
       }
 
@@ -105,7 +127,9 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
         amount,
         amountUsd: allocationValue,
         txHash,
+        approvalTxHash,
         status: "SUBMITTED",
+        warning: swapWarning,
         createdAt: new Date().toISOString(),
       };
 
@@ -131,6 +155,7 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
         trades: [trade, ...state.trades],
         activeTrade: trade,
         isExecuting: false,
+        swapPhase: "confirming",
       }));
 
       // Poll for transaction confirmation
@@ -142,6 +167,7 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
         error instanceof Error ? error.message : "Trade execution failed";
       set({
         isExecuting: false,
+        swapPhase: "idle",
         error: message,
         activeTrade: {
           id: tradeId,
@@ -152,7 +178,9 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
           amount: 0,
           amountUsd: 0,
           txHash: null,
+          approvalTxHash: null,
           status: "FAILED",
+          warning: null,
           createdAt: new Date().toISOString(),
         },
       });
@@ -164,7 +192,7 @@ export const useTradeStore = create<TradeStore>((set, get) => ({
   },
 
   resetTrade: () => {
-    set({ activeTrade: null, isExecuting: false, error: null });
+    set({ activeTrade: null, isExecuting: false, error: null, swapPhase: "idle" });
   },
 
   clearError: () => {

@@ -23,6 +23,10 @@ const SELECTORS = {
   getAmountsOut: "0xd06ca61f",
   addLiquidity: "0xe8e33700",
   removeLiquidity: "0xbaa2abde",
+  // ERC-20
+  approve: "0x095ea7b3",
+  allowance: "0xdd62ed3e",
+  symbol: "0x95d89b41",
 } as const;
 
 // ─── Helpers ────────────────────────────────────────────
@@ -182,6 +186,79 @@ export function encodeSwapExactTokensForETH(params: {
     deadline +
     pathData
   );
+}
+
+// ─── ERC-20 Calldata Encoding ───────────────────────────
+
+/**
+ * Maximum uint256 value for unlimited approvals.
+ * 2^256 - 1
+ */
+export const MAX_UINT256 =
+  BigInt(
+    "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  );
+
+/**
+ * Encode ERC-20 approve calldata.
+ *
+ * function approve(address spender, uint256 amount)
+ */
+export function encodeApprove(params: {
+  spender: string;
+  amount: string;
+}): string {
+  const spender = padAddress(params.spender);
+  const amount = toHex32(BigInt(params.amount));
+  return SELECTORS.approve + spender + amount;
+}
+
+/**
+ * Encode ERC-20 allowance query calldata.
+ *
+ * function allowance(address owner, address spender)
+ *   external view returns (uint256)
+ */
+export function encodeAllowance(params: {
+  owner: string;
+  spender: string;
+}): string {
+  const owner = padAddress(params.owner);
+  const spender = padAddress(params.spender);
+  return SELECTORS.allowance + owner + spender;
+}
+
+/**
+ * Encode ERC-20 symbol query calldata.
+ *
+ * function symbol() external view returns (string)
+ */
+export function encodeSymbol(): string {
+  return SELECTORS.symbol;
+}
+
+/**
+ * Decode an ERC-20 symbol response.
+ * Handles both short strings (< 32 bytes) and long strings (dynamic).
+ */
+export function decodeSymbol(hexData: string): string {
+  const clean = hexData.replace(/^0x/, "");
+  if (clean.length < 64) return "";
+
+  // Check if it's a short string inline encoding (legacy tokens)
+  // First 32 bytes: offset (usually 0x20 = 32)
+  // Next 32 bytes: length
+  // Remaining: data padded to 32 bytes
+  const offset = Number(BigInt("0x" + clean.slice(0, 64)));
+  if (isNaN(offset) || offset === 0) return "";
+
+  const length = Number(BigInt("0x" + clean.slice(64, 128)));
+  if (isNaN(length) || length === 0) return "";
+
+  const dataStart = 128;
+  const dataHex = clean.slice(dataStart, dataStart + length * 2);
+  const bytes = dataHex.match(/.{2}/g) ?? [];
+  return bytes.map((b) => String.fromCharCode(parseInt(b, 16))).join("");
 }
 
 // ─── Read-Only Call Encoding ────────────────────────────
